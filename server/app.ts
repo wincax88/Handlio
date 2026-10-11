@@ -12,6 +12,7 @@ import { installRoutes } from "./routes.js";
 import { installBilling } from "./billing.js";
 import { installJobs } from "./jobs.js";
 import { installOps } from "./ops.js";
+import { installMailWebhook } from "./mail-webhook.js";
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
@@ -44,6 +45,7 @@ export function createApp() {
     "/api/webhooks/billing",
     express.raw({ type: "application/json", limit: "1mb" }),
   );
+  app.use("/api/webhooks/resend", express.raw({ type: "application/json", limit: "256kb" }));
   app.use(express.json({ limit: "2mb" }));
   app.use(cookieParser());
   // Probes must stay available even when an API client hits its rate limit.
@@ -62,6 +64,7 @@ export function createApp() {
   installAuth(app);
   installRoutes(app);
   installBilling(app);
+  installMailWebhook(app);
   installJobs(app);
   installOps(app);
   app.use("/api", (req, res) =>

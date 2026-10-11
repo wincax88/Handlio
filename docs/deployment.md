@@ -6,7 +6,7 @@
 
 1. 使用 Node.js 22.13+，`npm ci` 后执行 `npm run build`。
 2. 复制 `.env.example`，配置 HTTPS `APP_ORIGIN` 和随机 `SESSION_SECRET`（至少 32 字符）。环境文件不能进入 Git。
-3. 设置 `NODE_ENV=production`、SMTP 和经认证的发信地址。生产验证码不会显示在页面。
+3. 设置 `NODE_ENV=production`、Resend API Key（或 SMTP）和经认证的通知 / 验证码发信地址。生产验证码不会显示在页面。
 4. 需要真实支付时配置已经完成主体审核的受控支付适配器、密钥及 Webhook Secret。按 `providers.md` 完成权威对象核验和真实订单 / 退款 / 结算验证。
 5. AI 仅在实际供应商、处理协议、告知和质量样例完成后开启。无 AI 时手工路径完整。
 6. 设置 `CHROMIUM_EXECUTABLE_PATH` 或安装 Playwright Chromium。保持浏览器更新；导出不允许网络请求或用户脚本。

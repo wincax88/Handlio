@@ -1,20 +1,10 @@
-import nodemailer from "nodemailer";
 import { AppError, id, many, now, one, run } from "./db.js";
 import { entitlement } from "./domain.js";
+import { deliverMail, MailProviderError, type MailOptions } from "./mail.js";
 export const development =
   process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "test";
 export const localMode = process.env.NODE_ENV !== "production";
 export const origin = process.env.APP_ORIGIN || "http://localhost:5173";
-const mail = process.env.SMTP_HOST
-  ? nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: process.env.SMTP_PORT === "465",
-      auth: process.env.SMTP_USER
-        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
-        : undefined,
-    })
-  : null;
 export function notify(
   projectId: string | null,
   eventKey: string,
@@ -36,22 +26,28 @@ export function notify(
     now(),
   );
 }
-export async function sendMail(email: string, subject: string, body: string) {
-  if (!mail) {
-    if (localMode) return "local";
-    throw new AppError(
-      "PROVIDER_UNAVAILABLE",
-      503,
-      "Email delivery is not configured.",
-    );
+export async function sendMail(email: string, subject: string, body: string, options: MailOptions = {}) {
+  const key = options.key || `mail/${id()}`;
+  const kind = options.kind || 'notification';
+  try {
+    const receipt = await deliverMail(email, subject, body, { ...options, key });
+    run("INSERT INTO mail_deliveries VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(delivery_key) DO UPDATE SET provider_message_id=excluded.provider_message_id,state=excluded.state,error_code=NULL,updated_at=excluded.updated_at",
+      id(), key, kind, receipt.provider, receipt.messageId, receipt.state, null, now(), now());
+    // A signed event may arrive before the provider's send response returns.
+    if (receipt.messageId) reconcileMailEvents(receipt.messageId);
+    return receipt.state;
+  } catch (error) {
+    const code = error instanceof MailProviderError ? error.code : 'EMAIL_PROVIDER_UNAVAILABLE';
+    run("INSERT INTO mail_deliveries VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(delivery_key) DO UPDATE SET state='failed',error_code=excluded.error_code,updated_at=excluded.updated_at",
+      id(), key, kind, process.env.MAIL_PROVIDER || 'smtp', null, 'failed', code, now(), now());
+    throw new AppError('PROVIDER_UNAVAILABLE', 503, 'Email delivery is temporarily unavailable. Retry later.');
   }
-  await mail.sendMail({
-    from: process.env.MAIL_FROM,
-    to: email,
-    subject,
-    text: body,
-  });
-  return "sent";
+}
+export function reconcileMailEvents(messageId: string) {
+  // Terminal failure is authoritative; late accepted/delayed events cannot undo it.
+  const events = many('SELECT state FROM mail_events WHERE provider_message_id=? ORDER BY occurred_at DESC,created_at DESC', messageId);
+  const final = events.find(e => ['bounced', 'failed', 'complained', 'suppressed'].includes(e.state)) || events.find(e => e.state === 'delivered') || events[0];
+  if (final) run('UPDATE mail_deliveries SET state=?,updated_at=? WHERE provider_message_id=?', final.state, now(), messageId);
 }
 export async function processNotifications() {
   for (const n of many(
@@ -99,7 +95,7 @@ export async function processNotifications() {
       }
     }
     try {
-      const state = await sendMail(n.recipient, n.subject, n.body);
+      const state = await sendMail(n.recipient, n.subject, n.body, { kind: 'notification', key: `notification/${n.id}` });
       run(
         "UPDATE notifications SET state=?,attempts=attempts+1 WHERE id=?",
         state,

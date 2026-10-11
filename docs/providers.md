@@ -1,10 +1,22 @@
 # 外部供应商契约
 
-供应商适配与领域逻辑分离。邮件使用 SMTP；支付与 AI 采用受控服务端 HTTP 适配协议，不把 PRD 中未选择的供应商硬编码成已开通服务。适配器需要由实际供应商账户和政策配置后部署。
+供应商适配与领域逻辑分离。邮件支持 Resend HTTPS API 和兼容 SMTP；支付与 AI 采用受控服务端 HTTP 适配协议。适配器需要由实际供应商账户和政策配置后部署。
 
 ## 邮件
 
-配置 `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`。默认 587 使用 STARTTLS，465 使用 TLS。生产启动要求 SMTP 已配置。开发模式没有 SMTP 时，登录页面显示开发验证码；邀请 outbox 显示 `local`，不能把它理解为已送达。
+Handlio 使用 `MAIL_PROVIDER=resend`、`RESEND_API_KEY`、`MAIL_FROM=Handlio <notifications@handlio.cloud>`、`MAIL_AUTH_FROM=Handlio <auth@handlio.cloud>`。验证码和重新验证会话使用 auth 地址，客户邀请、确认请求、回复和生命周期通知使用 notifications 地址。只有确认收件能力之后才填写 `MAIL_REPLY_TO`。
+
+Resend Key 放在后端环境或 GitHub Secret，建议 Sending access 限制到 `handlio.cloud`。域名必须在 Resend 控制台完成验证，关闭 open/click tracking；代码不添加追踪像素。根域收件 MX 与发信 Return-Path 记录分别配置，具体 DNS 值以账户生成记录为准。
+
+SMTP 兼容配置为 `MAIL_PROVIDER=smtp`、`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASSWORD`。587 / 2587 要求 STARTTLS，465 / 2465 使用隐式 TLS。生产缺少选定供应商凭据时拒绝启动；显式选择 Resend 后供应商错误不会降级为本地模拟。开发未选择供应商时显示开发验证码，通知 outbox 为 `local`，不表示真实投递。
+
+验证码以 challenge ID、通知以 outbox ID 生成稳定 Idempotency-Key。`mail_deliveries` 保存用途、邮件 ID、供应商、安全错误码和状态，不保存验证码、正文、API Key 或收件地址。`/api/ops` 仅向明确的运营白名单提供这些 metadata。
+
+Resend 接受请求记为 `accepted`。配置 `RESEND_WEBHOOK_SECRET` 并在 Resend 添加 `POST https://<APP_HOST>/api/webhooks/resend` 后，经过 Svix 原始正文验签、时间窗口检查和事件 ID 去重，接收 sent、delivered、delivery_delayed、bounced、failed、complained、suppressed 事件。支持事件先于 send 响应及乱序事件；终态失败不被迟到的 sent 覆盖。Webhook 不保存正文和收件人，不接受未签名请求，不处理 open/click 为阅读或收件确认。
+
+`delivered` 仅表示接收方邮件服务器接收，不代表主收件箱或客户已读。Webhook 未配置时只显示已接受，不推断投递。实际发信 Key、域名、关闭追踪、Webhook 注册、收件和垃圾箱仍需要真实账户验收。
+
+官方参考：[Resend Send Email](https://resend.com/docs/api-reference/emails/send-email)、[Webhook 验签](https://resend.com/docs/webhooks/verify-webhooks-requests)、[投递事件语义](https://resend.com/docs/webhooks/event-types)。
 
 事务通知不附截图或敏感正文，成功发出不表示客户阅读。邀请、发布、确认请求、问题、导出、支付、到期等事件按唯一键去重。发送前复核成员、分享和确认请求状态；失败最多 5 次，指数退避。
 

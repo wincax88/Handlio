@@ -21,9 +21,12 @@
 | --- | --- |
 | `SEALOS_KUBECONFIG` | 原始 kubeconfig 文件内容；必须在其 context 中设置目标命名空间 |
 | `SESSION_SECRET` | 至少 32 字符的随机会话签名密钥；重新发布保持不变 |
+| `RESEND_API_KEY` | Resend 模式必需，建议仅发送权限并限制到 handlio.cloud |
+| `RESEND_WEBHOOK_SECRET` | 可选，Resend Webhook 签名密钥；启用后能记录实际投递 / 退信 |
 | `SMTP_HOST` | 实际 SMTP 主机 |
 | `SMTP_USER`、`SMTP_PASSWORD` | 实际 SMTP 认证；无认证邮件网关可不填 |
 | `MAIL_FROM` | 已经认证的发信地址，可带显示名称 |
+| `MAIL_AUTH_FROM` | Resend 模式的验证码发件地址，`Handlio <auth@handlio.cloud>` |
 | `GHCR_READ_TOKEN` | 私有 GHCR 镜像需要具有 `read:packages` 权限的长期凭据；公开镜像不需要 |
 
 | Variable | 默认配置 |
@@ -32,6 +35,9 @@
 | `APP_ORIGIN` | `https://handlio-fd5llv5c.cloud.sealos.io` |
 | `SEALOS_TLS_SECRET` | `wildcard-cloud-sealos-io-cert`，来自目标平台公开配置 |
 | `SMTP_PORT` | `587`；465 自动使用隐式 TLS |
+| `MAIL_PROVIDER` | `resend`；SMTP 模式填写 `smtp` |
+| `MAIL_REPLY_TO` | 确认可收信之后设置；暂未验证时留空 |
+| `MAIL_TEST_RECIPIENT` | 操作者控制的测试邮箱；当前为用户指定的 `support@handlio.cloud` |
 | `SUPPORT_EMAIL` | 真实支持邮箱 |
 | `OPS_EMAILS` | 可选，运营账号邮箱逗号分隔白名单 |
 

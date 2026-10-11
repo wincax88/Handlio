@@ -26,7 +26,9 @@ if (
 }
 if (!image || !/^ghcr\.io\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/.test(image))
   throw new Error("A GHCR image digest is required.");
-const required = ["SESSION_SECRET", "SMTP_HOST", "MAIL_FROM"];
+const provider = env.MAIL_PROVIDER || 'smtp';
+if (!['resend', 'smtp'].includes(provider)) throw new Error('Production MAIL_PROVIDER must be resend or smtp.');
+const required = ["SESSION_SECRET", "MAIL_FROM", ...(provider === 'resend' ? ['RESEND_API_KEY', 'MAIL_AUTH_FROM'] : ['SMTP_HOST'])];
 const missing = required.filter((key) => !env[key]);
 if (missing.length)
   throw new Error(
@@ -111,13 +113,18 @@ try {
   const runtime = {
     SESSION_SECRET: env.SESSION_SECRET,
     APP_ORIGIN: origin.origin,
-    SMTP_HOST: env.SMTP_HOST,
+    MAIL_PROVIDER: provider,
     SMTP_PORT: env.SMTP_PORT || "587",
     MAIL_FROM: env.MAIL_FROM,
   };
   for (const key of [
+    "SMTP_HOST",
     "SMTP_USER",
     "SMTP_PASSWORD",
+    "RESEND_API_KEY",
+    "RESEND_WEBHOOK_SECRET",
+    "MAIL_AUTH_FROM",
+    "MAIL_REPLY_TO",
     "SUPPORT_EMAIL",
     "OPS_EMAILS",
     "BILLING_ADAPTER_URL",

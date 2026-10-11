@@ -118,11 +118,17 @@ jobs:
       APP_ORIGIN: ${{ vars.APP_ORIGIN }}
       DEPLOY_IMAGE: ${{ needs.image.outputs.reference }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      MAIL_PROVIDER: ${{ vars.MAIL_PROVIDER }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ vars.SMTP_PORT }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
       MAIL_FROM: ${{ secrets.MAIL_FROM }}
+      MAIL_AUTH_FROM: ${{ secrets.MAIL_AUTH_FROM }}
+      MAIL_REPLY_TO: ${{ vars.MAIL_REPLY_TO }}
+      MAIL_TEST_RECIPIENT: ${{ vars.MAIL_TEST_RECIPIENT }}
       SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
       OPS_EMAILS: ${{ vars.OPS_EMAILS }}
       GHCR_USERNAME: ${{ github.repository_owner }}
@@ -155,6 +161,8 @@ jobs:
           umask 077
           printf '%s' "$SEALOS_KUBECONFIG" > "$RUNNER_TEMP/handlio-kubeconfig"
           echo "KUBECONFIG=$RUNNER_TEMP/handlio-kubeconfig" >> "$GITHUB_ENV"
+      - name: Verify Resend credentials and both sending addresses
+        run: node scripts/verify-resend.mjs
       - name: Apply persistent resources and verify HTTPS
         run: node scripts/deploy-sealos.mjs
       - name: Remove temporary credential

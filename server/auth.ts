@@ -144,6 +144,7 @@ export function installAuth(app: Express) {
         b.email,
         "Your Handlio verification code",
         `Your verification code is ${code}. It expires in 10 minutes. Do not share this code.`,
+        { kind: "auth", key: `auth/${challengeId}` },
       );
     res.json({
       challengeId,

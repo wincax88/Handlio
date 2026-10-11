@@ -33,6 +33,9 @@ export function installOps(app: Express) {
       notifications: many(
         "SELECT id,state,attempts,created_at FROM notifications ORDER BY created_at DESC LIMIT 100",
       ),
+      mailDeliveries: many(
+        "SELECT id,kind,provider,provider_message_id,state,error_code,created_at,updated_at FROM mail_deliveries ORDER BY created_at DESC LIMIT 100",
+      ),
       requests: many(
         "SELECT id,kind,status,created_at FROM support_requests ORDER BY created_at DESC LIMIT 100",
       ),

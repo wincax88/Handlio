@@ -6,7 +6,7 @@
 
 ## 启动
 
-Sealos 自动部署使用 [GitHub Actions 配置说明](docs/sealos.md)。向 `main` 推送后自动测试、构建镜像和部署；生产 SMTP 与集群凭据必须先配置为 GitHub Secrets。
+Sealos 自动部署使用 [GitHub Actions 配置说明](docs/sealos.md)。向 `main` 推送后自动测试、构建镜像和部署；生产 Resend API Key（或 SMTP）与集群凭据必须先配置为 GitHub Secrets。
 
 需要 Node.js 22.13 或更新版本（当前使用 Node 内置 SQLite）。
 
@@ -23,7 +23,7 @@ Windows 中若 npm 默认镜像不可用，可执行 `npm ci --registry=https://
 
 ## 本地体验
 
-1. 输入邮箱，获取页面上明确标注的开发验证码并验证。SMTP 配置完成后也可使用真实验证码邮件。
+1. 输入邮箱，获取页面上明确标注的开发验证码并验证。Resend / SMTP 配置完成后也可使用真实验证码邮件。
 2. 新建项目，选择网站、软件实施或空白模板。补充每篇指南的目标、前提、角色、完成标准和实际步骤。
 3. 在 Screenshots 中选择图片、遮盖敏感区域、逐图确认，再点击上传。Guides 中填写预期结果和替代说明，逐步标记已核对。
 4. Handbook 中设置介绍、支持信息、品牌和交接清单。先预览并执行发布检查。
@@ -48,7 +48,7 @@ npm start
 - `npm run test:ui`：完整交接流程和本地遮盖像素测试，包含 360px 手机阅读。测试使用独立虚构邮箱；会在开发数据库中创建相应项目。
 - PDF 和浏览器测试优先使用 `CHROMIUM_EXECUTABLE_PATH`，Windows 中也可自动找到 Edge / Chrome。其他环境执行 `npx playwright install chromium`。
 - 测试截图、PDF 样例和追踪信息只放在忽略目录 `.work/` 与 `test-results/`。
-- `npm start` 服务生产构建产物和 API。生产模式还需配置 HTTPS Origin、随机会话密钥和 SMTP；详见 [部署与恢复](docs/deployment.md)。
+- `npm start` 服务生产构建产物和 API。生产模式还需配置 HTTPS Origin、随机会话密钥和 Resend / SMTP；详见 [部署与恢复](docs/deployment.md)。
 
 ## 代码结构
 
