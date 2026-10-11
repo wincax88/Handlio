@@ -1,0 +1,118 @@
+/* Essential small text uses darker values on the light surface. Status is also expressed in words. */
+.copy-project {
+  max-width: 700px;
+  padding: 14px 0 24px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.copy-project summary {
+  font-weight: 600;
+}
+.copy-project p {
+  color: var(--muted);
+}
+.field > label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #3c4d50;
+}
+.editor-properties .field > label {
+  font-size: 10px;
+}
+.manual-intro,
+.manual-guide-heading p,
+.manual-step > p,
+.manual-guide > p,
+.manual-prerequisites p,
+.manual-completion,
+.manual-checklist-item p,
+.manual-meta,
+.manual-footer,
+.manual-footer p,
+.manual-footer small,
+.client-feedback > p,
+.receipt-section > p,
+.reading-intro,
+.reader-outline nav a,
+.reader-outline > small {
+  color: #596d4e;
+}
+.manual-prerequisites strong,
+.manual-result > span,
+.manual-checklist-item strong,
+.manual-step-actions > button,
+.manual-completion strong,
+.zoom-button,
+.support-link,
+.manual-brand {
+  color: #46653a;
+}
+.manual-cover .eyebrow,
+.reader-topbar > div,
+.manual-meta > span,
+.manual-changes {
+  color: #647b50;
+}
+.manual-warning {
+  color: #80622c !important;
+}
+.receipt-section .eyebrow {
+  color: #526c43;
+}
+.sidebar-note p,
+.sidebar-note a,
+.sidebar-bottom > a,
+.sidebar-bottom > button,
+.user-line small,
+.outline-foot,
+.guide-select > span,
+.outline-steps > button > span:first-child,
+.editor-breadcrumb,
+.tool-help,
+.upload-drop span,
+.queue-item small,
+.setup-row p,
+.cover-footer > span,
+.expiry-label,
+.list-footnote,
+.project-tabs > a,
+.topbar {
+  color: #64765c;
+}
+.handbook-cover > p,
+.hero-footnote,
+.landing-hero > div:first-child > p:not(.eyebrow),
+.landing-process p,
+.preview-eyebrow,
+.preview-bottom,
+.preview-chapter > span,
+.handbook-preview > p:not(.preview-eyebrow),
+.marketing-nav nav,
+.marketing-footer > span,
+.marketing-footer > div,
+.preview-caption {
+  color: #63775a;
+}
+.eyebrow,
+.nav-label,
+.outline-heading,
+.step-label,
+.template-option p,
+.upload-drop strong,
+.included-guide small,
+.publishing-note p,
+.export-note p,
+.billing-notes p,
+.export-note small,
+.ai-section > small,
+.ai-section > .muted {
+  color: #5c7250;
+}
+.badge.green {
+  color: #315a41;
+}
+.badge.neutral,
+.badge {
+  color: #53614c;
+}

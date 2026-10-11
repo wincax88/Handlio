@@ -1,0 +1,162 @@
+name: Test, build and deploy to Sealos
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sealos-${{ github.ref }}
+  # Do not interrupt an in-progress SQLite deployment.
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:ui
+        env:
+          DATA_DIR: ${{ runner.temp }}/handlio-e2e
+          NODE_ENV: development
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: browser-test-results
+          path: test-results/
+          retention-days: 7
+
+  image:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      reference: ${{ steps.reference.outputs.image }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: name
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "image=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.name.outputs.image }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - id: reference
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "image=$IMAGE@$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Smoke test the production image and Chinese PDF export
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}@${{ steps.build.outputs.digest }}
+        run: |
+          docker run -d --name handlio-smoke -p 127.0.0.1:3001:3001 \
+            -e APP_ORIGIN=https://smoke.invalid \
+            -e SESSION_SECRET="$(openssl rand -hex 32)" \
+            -e SMTP_HOST=smtp.invalid -e MAIL_FROM=smoke@example.invalid "$IMAGE"
+          trap 'docker rm -f handlio-smoke >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3001/api/health; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:3001/api/health
+          curl --fail --silent http://127.0.0.1:3001/ | grep -q '<div id="root"'
+          docker exec handlio-smoke node --input-type=module -e '
+            import { chromium } from "playwright";
+            const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE_PATH });
+            const page = await browser.newPage();
+            await page.setContent("<h1>Handlio 中文操作手册</h1>");
+            const pdf = await page.pdf({ format: "A4" });
+            if (pdf.length < 1000) throw new Error("Empty PDF");
+            await browser.close();
+          '
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: sealos
+      url: ${{ vars.APP_ORIGIN }}
+    env:
+      SEALOS_NAMESPACE: ${{ vars.SEALOS_NAMESPACE }}
+      SEALOS_TLS_SECRET: ${{ vars.SEALOS_TLS_SECRET }}
+      APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+      DEPLOY_IMAGE: ${{ needs.image.outputs.reference }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ vars.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      MAIL_FROM: ${{ secrets.MAIL_FROM }}
+      SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
+      OPS_EMAILS: ${{ vars.OPS_EMAILS }}
+      GHCR_USERNAME: ${{ github.repository_owner }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+      BILLING_ADAPTER_URL: ${{ vars.BILLING_ADAPTER_URL }}
+      BILLING_ADAPTER_TOKEN: ${{ secrets.BILLING_ADAPTER_TOKEN }}
+      BILLING_WEBHOOK_SECRET: ${{ secrets.BILLING_WEBHOOK_SECRET }}
+      AI_ADAPTER_URL: ${{ vars.AI_ADAPTER_URL }}
+      AI_ADAPTER_TOKEN: ${{ secrets.AI_ADAPTER_TOKEN }}
+      AI_PRIVACY_NOTICE: ${{ vars.AI_PRIVACY_NOTICE }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Install kubectl matching the cluster minor version
+        env:
+          VERSION: v1.28.15
+        run: |
+          curl --fail --silent --show-error -LO "https://dl.k8s.io/release/$VERSION/bin/linux/amd64/kubectl"
+          curl --fail --silent --show-error -LO "https://dl.k8s.io/release/$VERSION/bin/linux/amd64/kubectl.sha256"
+          echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+      - name: Write private kubeconfig
+        env:
+          SEALOS_KUBECONFIG: ${{ secrets.SEALOS_KUBECONFIG }}
+        run: |
+          test -n "$SEALOS_KUBECONFIG" || { echo 'SEALOS_KUBECONFIG secret is required.'; exit 1; }
+          umask 077
+          printf '%s' "$SEALOS_KUBECONFIG" > "$RUNNER_TEMP/handlio-kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/handlio-kubeconfig" >> "$GITHUB_ENV"
+      - name: Apply persistent resources and verify HTTPS
+        run: node scripts/deploy-sealos.mjs
+      - name: Remove temporary credential
+        if: always()
+        run: rm -f "$RUNNER_TEMP/handlio-kubeconfig"
