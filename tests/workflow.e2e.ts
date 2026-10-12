@@ -31,6 +31,12 @@ test("creator workflow, immutable release, client receipt and responsive reading
   const code = await page.locator(".notice strong").textContent();
   await page.getByLabel("Verification code").fill(code!);
   await page.getByRole("button", { name: "Verify email", exact: true }).click();
+  await page.getByLabel("Your display name").fill("Alex Morgan");
+  await page.getByLabel("Workspace name", { exact: true }).fill("Pine Studio");
+  await page
+    .getByLabel("Support email", { exact: true })
+    .fill("help@example.test");
+  await page.getByRole("button", { name: "Create my workspace" }).click();
   await expect(
     page.getByRole("heading", { name: "Your next handoff, made clear." }),
   ).toBeVisible();

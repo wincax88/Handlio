@@ -115,6 +115,37 @@ export function applyTransaction(input: unknown, expectedEnvironment: string) {
   });
 }
 export function installBilling(app: Express) {
+  app.get("/api/billing/orders/:id", authenticated, (req, res) => {
+    const order = requireValue(
+      one(
+        "SELECT * FROM orders WHERE id=? AND workspace_id=?",
+        String(req.params.id),
+        res.locals.user.workspace_id,
+      ),
+    );
+    const p = owner(res.locals.user, order.project_id);
+    res.json({
+      ...order,
+      projectName: p.name,
+      entitlement: entitlement(p),
+      receipt:
+        one(
+          "SELECT tax,receipt_url,invoice_number FROM order_receipts WHERE order_id=?",
+          order.id,
+        ) || null,
+    });
+  });
+  app.post("/api/billing/orders/:id/check", authenticated, async (req, res) => {
+    const order = requireValue(
+      one(
+        "SELECT * FROM orders WHERE id=? AND workspace_id=?",
+        String(req.params.id),
+        res.locals.user.workspace_id,
+      ),
+    );
+    owner(res.locals.user, order.project_id);
+    res.json(await reconcileOrder(order.id, res.locals.user.id));
+  });
   app.get("/api/billing", authenticated, (req, res) =>
     res.json({
       pricing: PRICING,
@@ -219,7 +250,7 @@ export function installBilling(app: Express) {
         currency: o.currency,
         product: o.product,
         projectId: p.id,
-        returnUrl: `${origin}/app/billing`,
+        returnUrl: `${origin}/app/payment/${o.id}`,
         idempotencyKey: o.id,
       });
       const checked = z
@@ -338,6 +369,86 @@ export function installBilling(app: Express) {
     );
     res.status(202).json({ received: true });
   });
+}
+export async function reconcileOrder(orderId: string, actorId: string) {
+  const order = requireValue(one("SELECT * FROM orders WHERE id=?", orderId));
+  if (!process.env.BILLING_ADAPTER_URL) {
+    if (!localMode)
+      throw new AppError(
+        "PROVIDER_UNAVAILABLE",
+        503,
+        "Payment verification is not configured.",
+      );
+    return { status: order.status, local: true };
+  }
+  tx(() => {
+    const last = one(
+      "SELECT checked_at FROM order_checks WHERE order_id=?",
+      order.id,
+    );
+    if (last && now() - last.checked_at < 60000)
+      throw new AppError(
+        "RATE_LIMITED",
+        429,
+        "Wait one minute before checking this order again.",
+      );
+    run(
+      "INSERT INTO order_checks VALUES (?,?) ON CONFLICT(order_id) DO UPDATE SET checked_at=excluded.checked_at",
+      order.id,
+      now(),
+    );
+    audit(actorId, order.project_id, "order_verification_requested", {
+      orderId,
+    });
+  });
+  const raw = await adapterRequest(
+    "billing",
+    `/orders/${encodeURIComponent(order.id)}`,
+  );
+  if (raw.status === "pending") {
+    if (raw.orderId !== order.id)
+      throw new AppError(
+        "PAYMENT_MISMATCH",
+        400,
+        "Payment details do not match the order.",
+      );
+  } else {
+    const transaction = transactionSchema.parse(raw);
+    if (transaction.orderId !== order.id)
+      throw new AppError(
+        "PAYMENT_MISMATCH",
+        400,
+        "Payment details do not match the order.",
+      );
+    applyTransaction(
+      transaction,
+      process.env.NODE_ENV === "production" ? "production" : "sandbox",
+    );
+    const receipt = z
+      .object({
+        tax: z.number().int().nonnegative().nullable().default(null),
+        receiptUrl: z
+          .string()
+          .url()
+          .refine((v) => v.startsWith("https://"))
+          .nullable()
+          .default(null),
+        invoiceNumber: z.string().max(200).nullable().default(null),
+      })
+      .safeParse(raw);
+    if (receipt.success)
+      run(
+        "INSERT INTO order_receipts VALUES (?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET tax=excluded.tax,receipt_url=excluded.receipt_url,invoice_number=excluded.invoice_number",
+        order.id,
+        receipt.data.tax,
+        receipt.data.receiptUrl,
+        receipt.data.invoiceNumber,
+      );
+  }
+  return {
+    status: requireValue(one("SELECT status FROM orders WHERE id=?", order.id))
+      .status,
+  };
 }
 export async function processWebhooks() {
   for (const e of many(

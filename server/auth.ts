@@ -8,6 +8,8 @@ import {
 import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { emailSchema } from "../shared/model.js";
+import { workspaceDefaults, workspaceSettings } from "../shared/workspace.js";
+import { fresh } from "./domain.js";
 import {
   AppError,
   audit,
@@ -37,6 +39,22 @@ export function installAuth(app: Express) {
         hash(token),
         now(),
       );
+    if (res.locals.user) {
+      run(
+        "INSERT OR IGNORE INTO session_devices VALUES (?,?,?,?,?)",
+        res.locals.user.session_digest,
+        id(),
+        (req.get("user-agent") || "Unknown device").slice(0, 300),
+        now(),
+        now(),
+      );
+      run(
+        "UPDATE session_devices SET last_seen_at=? WHERE session_digest=? AND last_seen_at<?",
+        now(),
+        res.locals.user.session_digest,
+        now() - 60000,
+      );
+    }
     if (
       !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
       !req.path.startsWith("/webhooks/")
@@ -195,12 +213,7 @@ export function installAuth(app: Express) {
           uid,
           c.email,
           b.purpose === "owner" ? id() : null,
-          JSON.stringify({
-            name: "My workspace",
-            timezone: "UTC",
-            supportEmail: "",
-            expiryReminders: true,
-          }),
+          JSON.stringify(workspaceDefaults),
         );
         u = one("SELECT * FROM users WHERE id=?", uid);
       }
@@ -260,7 +273,7 @@ export function installAuth(app: Express) {
             id: u.id,
             email: u.email,
             workspaceId: u.workspace_id,
-            settings: JSON.parse(u.settings),
+            settings: workspaceSettings(u.settings),
             csrf: u.csrf,
             verifiedAt: u.verified_at,
           }
@@ -282,11 +295,13 @@ export function installAuth(app: Express) {
     res.json({ ok: true });
   });
   app.post("/api/auth/logout-others", authenticated, (req, res) => {
+    fresh(res.locals.user);
     run(
       "DELETE FROM sessions WHERE user_id=? AND digest!=?",
       res.locals.user.id,
       res.locals.user.session_digest,
     );
+    audit(res.locals.user.id, null, "other_sessions_revoked");
     res.json({ ok: true });
   });
 }

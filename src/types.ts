@@ -1,4 +1,5 @@
 import type { Draft, Release } from "../shared/model";
+import type { WorkspaceSettings } from "../shared/workspace";
 export type Project = {
   id: string;
   publicId: string;
@@ -23,6 +24,7 @@ export type Project = {
     };
     aiRemaining: number;
     exportsUsed: number;
+    exportsToday: number;
     storage: number;
   };
   openQuestions: number;
@@ -35,12 +37,7 @@ export type Session = {
     workspaceId: string | null;
     csrf: string;
     verifiedAt: number;
-    settings: {
-      name: string;
-      timezone: string;
-      supportEmail: string;
-      expiryReminders: boolean;
-    };
+    settings: WorkspaceSettings;
   };
   localMode: boolean;
   aiEnabled: boolean;

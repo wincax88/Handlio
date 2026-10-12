@@ -116,6 +116,12 @@ export function entitlement(p: Row, at = now()) {
           ? Math.max(0, 300 - aiUsed)
           : 0,
     exportsUsed,
+    exportsToday:
+      one(
+        "SELECT COALESCE(SUM(reserved+committed),0) AS total FROM usage WHERE project_id=? AND kind='export' AND created_at>=?",
+        p.id,
+        new Date(at).setUTCHours(0, 0, 0, 0),
+      )?.total || 0,
     storage,
     window,
   };
@@ -229,7 +235,7 @@ export function projectDto(p: Row) {
 }
 export function requestDto(r: Row) {
   const confirmations = many(
-    "SELECT member_id,created_at,hash,wording FROM confirmations WHERE request_id=?",
+    "SELECT id,member_id,created_at,hash,wording FROM confirmations WHERE request_id=?",
     r.id,
   );
   return {

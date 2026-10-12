@@ -100,14 +100,111 @@ function reserve(p: Row, jid: string, kind: string, amount: number) {
     now(),
   );
 }
+export function retryJob(jobId: string, actorId: string, reason: string) {
+  return tx(() => {
+    const job = requireValue(one("SELECT * FROM jobs WHERE id=?", jobId));
+    if (!["export", "ai"].includes(job.type))
+      throw new AppError(
+        "RETRY_UNAVAILABLE",
+        409,
+        "Publishing needs a new draft check. Create a new publish request.",
+      );
+    if (["queued", "running"].includes(job.state)) return { jobId: job.id };
+    if (job.state !== "failed" || job.attempts >= 4)
+      throw new AppError(
+        "RETRY_UNAVAILABLE",
+        409,
+        "This task cannot be retried. Create a new request.",
+      );
+    const p = requireValue(
+      one(
+        "SELECT * FROM projects WHERE id=? AND lifecycle!='deleted'",
+        job.project_id,
+      ),
+    );
+    const actor = requireValue(
+      one("SELECT * FROM users WHERE id=?", job.actor_id),
+    );
+    const input = JSON.parse(job.input);
+    if (job.type === "export") {
+      const release = loadRelease(input.releaseId);
+      accessRelease(actor, release, true);
+      if (release.status !== "published")
+        throw new AppError(
+          "ACCESS_UNAVAILABLE",
+          404,
+          "This release is unavailable.",
+        );
+    } else {
+      editable(p);
+      if (input.revision !== p.revision)
+        throw new AppError(
+          "DRAFT_CONFLICT",
+          409,
+          "The draft changed. Generate a new suggestion from the current step.",
+        );
+      if (
+        many(
+          "SELECT id FROM jobs WHERE project_id=? AND type='ai' AND state IN ('queued','running')",
+          p.id,
+        ).length >= 2
+      )
+        throw new AppError(
+          "JOB_BUSY",
+          409,
+          "Two AI tasks are already in progress.",
+        );
+    }
+    const usage = requireValue(
+      one("SELECT * FROM usage WHERE task_id=?", job.id),
+    );
+    if (usage.committed || usage.reserved)
+      throw new AppError(
+        "RETRY_UNAVAILABLE",
+        409,
+        "This task has already consumed or reserved allowance.",
+      );
+    run("DELETE FROM usage WHERE task_id=?", job.id);
+    reserve(p, job.id, usage.kind, job.type === "ai" ? input.steps.length : 1);
+    run(
+      "UPDATE jobs SET state='queued',error=NULL,lease_at=NULL,finished_at=NULL WHERE id=?",
+      job.id,
+    );
+    audit(actorId, p.id, "job_retry_requested", { jobId, reason });
+    return { jobId: job.id };
+  });
+}
 export function installJobs(app: Express) {
+  app.post("/api/jobs/:id/retry", authenticated, (req, res) => {
+    const job = requireValue(
+      one("SELECT * FROM jobs WHERE id=?", String(req.params.id)),
+    );
+    owner(res.locals.user, job.project_id);
+    const b = z
+      .object({ reason: z.string().trim().min(5).max(500) })
+      .parse(req.body);
+    res.status(202).json(retryJob(job.id, res.locals.user.id, b.reason));
+  });
   app.get("/api/projects/:id/jobs", authenticated, (req, res) => {
     const p = owner(res.locals.user, String(req.params.id));
     res.json(
       many(
-        "SELECT id,type,state,output,error,created_at,finished_at FROM jobs WHERE project_id=? ORDER BY created_at DESC LIMIT 50",
+        "SELECT id,type,state,input,output,error,created_at,finished_at FROM jobs WHERE project_id=? ORDER BY created_at DESC LIMIT 50",
         p.id,
-      ).map((j) => ({ ...j, output: j.output ? JSON.parse(j.output) : null })),
+      ).map(({ input, ...j }) => {
+        const options = JSON.parse(input);
+        return {
+          ...j,
+          output: j.output ? JSON.parse(j.output) : null,
+          releaseId: options.releaseId,
+          format: options.format,
+          paper: options.paper,
+          availableUntil:
+            j.state === "succeeded" && j.finished_at
+              ? j.finished_at + 7 * DAY
+              : null,
+        };
+      }),
     );
   });
   app.post("/api/projects/:id/ai-jobs", authenticated, (req, res) => {
@@ -571,6 +668,10 @@ export async function maintenance() {
   if (maintenanceBusy) return;
   maintenanceBusy = true;
   try {
+    run(
+      "UPDATE support_grants SET sample='' WHERE expires_at<=? AND sample!=''",
+      now(),
+    );
     for (const p of many("SELECT * FROM projects WHERE lifecycle!='deleted'")) {
       const e = entitlement(p);
       const u = one("SELECT * FROM users WHERE workspace_id=?", p.workspace_id);
@@ -633,6 +734,13 @@ export async function maintenance() {
           for (const s of g.steps) if (s.assetId) referenced.add(s.assetId);
       }
       collect(JSON.parse(p.draft));
+      for (const user of many(
+        "SELECT settings FROM users WHERE workspace_id=?",
+        p.workspace_id,
+      )) {
+        const logoId = JSON.parse(user.settings).logoId;
+        if (logoId) referenced.add(logoId);
+      }
       for (const r of many(
         "SELECT snapshot FROM releases WHERE project_id=? AND status!='security_revoked'",
         p.id,

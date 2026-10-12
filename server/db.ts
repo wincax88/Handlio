@@ -37,6 +37,10 @@ CREATE INDEX IF NOT EXISTS idx_usage_project ON usage(project_id,kind);
 CREATE TABLE IF NOT EXISTS mail_deliveries (id TEXT PRIMARY KEY, delivery_key TEXT UNIQUE NOT NULL, kind TEXT NOT NULL, provider TEXT NOT NULL, provider_message_id TEXT UNIQUE, state TEXT NOT NULL, error_code TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS mail_events (id TEXT PRIMARY KEY, provider_message_id TEXT NOT NULL, state TEXT NOT NULL, occurred_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_mail_events_message ON mail_events(provider_message_id,occurred_at);
+CREATE TABLE IF NOT EXISTS session_devices (session_digest TEXT PRIMARY KEY REFERENCES sessions(digest) ON DELETE CASCADE, id TEXT UNIQUE NOT NULL, agent TEXT NOT NULL, created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS support_grants (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), scope TEXT NOT NULL, sample TEXT NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS order_checks (order_id TEXT PRIMARY KEY REFERENCES orders(id), checked_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS order_receipts (order_id TEXT PRIMARY KEY REFERENCES orders(id), tax INTEGER, receipt_url TEXT, invoice_number TEXT);
 `);
 // SQL is always parameterized. JSON snapshots remain immutable after publication.
 export type Row = Record<string, any>;

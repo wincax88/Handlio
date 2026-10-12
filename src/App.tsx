@@ -29,7 +29,7 @@ import {
   Download,
   CircleHelp,
 } from "lucide-react";
-import { api, navigate, send, setCsrf } from "./api";
+import { api, assetUrl, navigate, send, setCsrf } from "./api";
 import {
   Back,
   Badge,
@@ -47,6 +47,8 @@ import { Logo, MiniHandbook, Metric } from "./Prototype";
 import { ProjectPage } from "./ProjectPage";
 import { Reader } from "./Reader";
 import { Billing, SettingsPage, Help, Policy, Ops } from "./Misc";
+import { Onboarding } from "./Workspace";
+import { PaymentPage } from "./Payment";
 const defaultSession: Session = {
   user: null,
   localMode: false,
@@ -114,9 +116,13 @@ export function App() {
   if (!route.startsWith("/app")) return <Landing session={session} />;
   if (!session.user?.workspaceId)
     return <Auth session={session} refresh={refresh} />;
+  if (!session.user.settings.onboardingComplete || route === "/app/onboarding")
+    return <Onboarding session={session} refresh={refresh} />;
   return (
     <Shell session={session} route={route} refresh={refresh}>
-      {route === "/app/examples" ? (
+      {route.startsWith("/app/payment/") ? (
+        <PaymentPage orderId={route.split("/")[3]} session={session} />
+      ) : route === "/app/examples" ? (
         <Examples session={session} />
       ) : route === "/app/billing" ? (
         <Billing session={session} />
@@ -216,12 +222,16 @@ function Shell({
         <Brand />
         <div className="workspace-switch">
           <span className="workspace-avatar">
-            {user.settings.name
-              .split(/\s+/)
-              .map((v) => v[0])
-              .slice(0, 2)
-              .join("")
-              .toUpperCase()}
+            {user.settings.logoId ? (
+              <img src={assetUrl(user.settings.logoId)} alt="Workspace logo" />
+            ) : (
+              user.settings.name
+                .split(/\s+/)
+                .map((v) => v[0])
+                .slice(0, 2)
+                .join("")
+                .toUpperCase()
+            )}
           </span>
           <div>
             <strong>{user.settings.name}</strong>
@@ -295,7 +305,9 @@ function Shell({
                 .toUpperCase()}
             </span>
             <Link to="/app/settings">
-              <strong>{user.email.split("@")[0]}</strong>
+              <strong>
+                {user.settings.displayName || user.email.split("@")[0]}
+              </strong>
               <small>Workspace owner</small>
             </Link>
             <button
@@ -668,6 +680,9 @@ function Examples({ session }: { session: Session }) {
             >
               Use a website starter <ArrowRight size={16} />
             </Link>
+            <a href="/samples/index.html" className="button secondary">
+              Open sample handbook
+            </a>
           </div>
         </article>
         <article className="example-card">
@@ -708,6 +723,38 @@ function Examples({ session }: { session: Session }) {
           </div>
         </article>
       </div>
+      <Panel title="See what leaves the platform">
+        <p>
+          A fictional Northstar version 2 handbook. These files contain sample
+          content only.
+        </p>
+        <div className="action-row">
+          <a
+            className="button secondary"
+            href="/samples/Northstar_v2_SAMPLE.pdf"
+            download
+          >
+            Sample PDF
+          </a>
+          <a
+            className="button secondary"
+            href="/samples/Northstar_v2_OFFLINE_SAMPLE.zip"
+            download
+          >
+            Offline HTML ZIP
+          </a>
+          <Link
+            to={
+              session.user?.workspaceId
+                ? "/app/projects/new?template=blank"
+                : "/auth"
+            }
+            className="button text"
+          >
+            Start from blank
+          </Link>
+        </div>
+      </Panel>
       <div className="notice">
         <ShieldCheck size={17} />
         <span>

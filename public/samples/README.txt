@@ -1,0 +1,1 @@
+FICTIONAL SAMPLE. Extract and open index.html. No network or account is required for reading. No tracking, scripts or font files. Online feedback/receipt is not included. This is fixed v2 sample content, not an export of edits made in the UI prototype.

@@ -18,7 +18,7 @@ import {
 import { Logo } from "./Prototype";
 import type { Release } from "../shared/model";
 import type { Session } from "./types";
-import { api, assetUrl, formatDate, send } from "./api";
+import { api, ApiError, assetUrl, formatDate, send } from "./api";
 import {
   Badge,
   Button,
@@ -309,6 +309,16 @@ export function Reader({
   const [message, setMessage] = useState("");
   const [tocOpen, setTocOpen] = useState(false);
   const [activeAnchor, setActiveAnchor] = useState("handbook-overview");
+  const [replies, setReplies] = useState<Record<string, string>>({});
+  const [versionChange, setVersionChange] = useState<{
+    reviewed: number;
+    current: number | null;
+  } | null>(null);
+  useEffect(() => {
+    setAck(false);
+    setMessage("");
+    setQuestion(false);
+  }, [data?.release.id]);
   async function load() {
     const rid = new URLSearchParams(location.search).get("release");
     try {
@@ -381,6 +391,14 @@ export function Reader({
       await load();
     } catch (e) {
       setError((e as Error).message);
+      if (e instanceof ApiError && e.code === "VERSION_CHANGED") {
+        let current = null;
+        try {
+          current = (await api(`/client/handbooks/${publicId}`)).currentVersion;
+        } catch {}
+        setVersionChange({ reviewed: data.release.version, current });
+        setAck(false);
+      }
     } finally {
       setBusy(false);
     }
@@ -755,6 +773,41 @@ export function Reader({
                     {q.resolution && (
                       <p className="resolution">Resolution: {q.resolution}</p>
                     )}
+                    {feedback && q.isMine && q.status === "open" && (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void action(async () => {
+                            await send(`/questions/${q.id}/replies`, {
+                              body: replies[q.id],
+                            });
+                            setReplies({ ...replies, [q.id]: "" });
+                            setMessage(
+                              "Your reply was added to this version’s question.",
+                            );
+                          });
+                        }}
+                      >
+                        <Field label="Reply to my question">
+                          <textarea
+                            required
+                            rows={2}
+                            maxLength={2000}
+                            value={replies[q.id] || ""}
+                            onChange={(e) =>
+                              setReplies({ ...replies, [q.id]: e.target.value })
+                            }
+                          />
+                        </Field>
+                        <Button
+                          type="submit"
+                          kind="secondary"
+                          disabled={busy || !replies[q.id]?.trim()}
+                        >
+                          Send reply
+                        </Button>
+                      </form>
+                    )}
                     {q.isMine && q.status === "open" && (
                       <Button
                         kind="text"
@@ -779,6 +832,31 @@ export function Reader({
           )}
           {request && (
             <section className="receipt-section" id="version-receipt">
+              {versionChange && (
+                <div className="version-change" role="alert">
+                  <p className="eyebrow">VERSION CHANGED</p>
+                  <h2>There is a newer version to review.</h2>
+                  <p>
+                    You were reviewing v{versionChange.reviewed}.{" "}
+                    {versionChange.current
+                      ? `Version v${versionChange.current} is now current.`
+                      : "Open the current handbook to check its version."}{" "}
+                    Your confirmation was not submitted or carried forward.
+                  </p>
+                  <Button
+                    disabled={busy}
+                    onClick={() =>
+                      void action(async () => {
+                        history.pushState({}, "", `/h/${publicId}`);
+                        setVersionChange(null);
+                        setAck(false);
+                      })
+                    }
+                  >
+                    Open the current version
+                  </Button>
+                </div>
+              )}
               <div>
                 <CheckCircle2 size={25} />
                 <div>
@@ -827,7 +905,10 @@ export function Reader({
                   </label>
                   <Button
                     disabled={
-                      !ack || busy || unresolved.some((q: any) => q.blocking)
+                      !ack ||
+                      busy ||
+                      !!versionChange ||
+                      unresolved.some((q: any) => q.blocking)
                     }
                     onClick={() =>
                       void action(async () => {
@@ -854,9 +935,92 @@ export function Reader({
                 </>
               )}
               {confirmed && (
-                <Badge tone="green">
-                  Recorded {formatDate(request.confirmations[0].created_at)}
-                </Badge>
+                <div className="receipt-record">
+                  <Badge tone="green">Receipt recorded</Badge>
+                  <dl className="detail-list">
+                    <div>
+                      <dt>Project</dt>
+                      <dd>{r.snapshot.projectName}</dd>
+                    </div>
+                    <div>
+                      <dt>Version</dt>
+                      <dd>
+                        v{r.version} · Published{" "}
+                        {formatDate(
+                          r.publishedAt,
+                          session.user!.settings.timezone,
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Confirmed by</dt>
+                      <dd>
+                        {session.user!.settings.displayName ||
+                          session.user!.email}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Verified email</dt>
+                      <dd>{data.member.email || session.user!.email}</dd>
+                    </div>
+                    <div>
+                      <dt>Confirmed at</dt>
+                      <dd>
+                        {formatDate(
+                          request.confirmations[0].created_at,
+                          session.user!.settings.timezone,
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Receipt reference</dt>
+                      <dd>{request.confirmations[0].id}</dd>
+                    </div>
+                    <div>
+                      <dt>Request reference</dt>
+                      <dd>{request.id}</dd>
+                    </div>
+                    <div>
+                      <dt>Scope</dt>
+                      <dd>
+                        {r.snapshot.guides.length} guides ·{" "}
+                        {r.snapshot.guides.reduce(
+                          (n, g) => n + g.steps.length,
+                          0,
+                        )}{" "}
+                        steps ·{" "}
+                        {
+                          request.checklist.filter((c: any) => c.required)
+                            .length
+                        }{" "}
+                        required checklist items
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Snapshot SHA-256</dt>
+                      <dd className="hash-line">
+                        {request.confirmations[0].hash}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p>
+                    Future revisions require a new request. This record remains
+                    attached to version v{r.version}.
+                  </p>
+                  {data.member.download && (
+                    <Button
+                      kind="secondary"
+                      disabled={busy}
+                      onClick={() =>
+                        void action(async () => {
+                          await exportFile("pdf");
+                        })
+                      }
+                    >
+                      Download handbook PDF
+                    </Button>
+                  )}
+                </div>
               )}
             </section>
           )}

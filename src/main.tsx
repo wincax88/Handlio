@@ -5,6 +5,7 @@ import "./styles.css";
 import "./accessibility.css";
 import "./reference-base.css";
 import "./prototype.css";
+import "./completion.css";
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

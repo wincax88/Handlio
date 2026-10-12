@@ -1,10 +1,20 @@
 import { AppError, id, many, now, one, run } from "./db.js";
 import { entitlement } from "./domain.js";
 import { deliverMail, MailProviderError, type MailOptions } from "./mail.js";
+import { workspaceSettings } from "../shared/workspace.js";
 export const development =
   process.env.NODE_ENV !== "production" && process.env.NODE_ENV !== "test";
 export const localMode = process.env.NODE_ENV !== "production";
 export const origin = process.env.APP_ORIGIN || "http://localhost:5173";
+function optionalNotificationAllowed(settings: string, eventKey: string) {
+  const preferences = workspaceSettings(settings);
+  return !(
+    (!preferences.questionNotifications &&
+      /^(question|reply):/.test(eventKey)) ||
+    (!preferences.receiptNotifications && /^receipt:/.test(eventKey)) ||
+    (!preferences.expiryReminders && /^expiry:/.test(eventKey))
+  );
+}
 export function notify(
   projectId: string | null,
   eventKey: string,
@@ -12,6 +22,15 @@ export function notify(
   subject: string,
   body: string,
 ) {
+  if (projectId) {
+    const owner = one(
+      "SELECT u.email,u.settings FROM users u JOIN projects p ON p.workspace_id=u.workspace_id WHERE p.id=?",
+      projectId,
+    );
+    if (owner?.email === email) {
+      if (!optionalNotificationAllowed(owner.settings, eventKey)) return;
+    }
+  }
   run(
     "INSERT OR IGNORE INTO notifications VALUES (?,?,?,?,?,?,?,?,?,?)",
     id(),
@@ -26,28 +45,77 @@ export function notify(
     now(),
   );
 }
-export async function sendMail(email: string, subject: string, body: string, options: MailOptions = {}) {
+export async function sendMail(
+  email: string,
+  subject: string,
+  body: string,
+  options: MailOptions = {},
+) {
   const key = options.key || `mail/${id()}`;
-  const kind = options.kind || 'notification';
+  const kind = options.kind || "notification";
   try {
-    const receipt = await deliverMail(email, subject, body, { ...options, key });
-    run("INSERT INTO mail_deliveries VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(delivery_key) DO UPDATE SET provider_message_id=excluded.provider_message_id,state=excluded.state,error_code=NULL,updated_at=excluded.updated_at",
-      id(), key, kind, receipt.provider, receipt.messageId, receipt.state, null, now(), now());
+    const receipt = await deliverMail(email, subject, body, {
+      ...options,
+      key,
+    });
+    run(
+      "INSERT INTO mail_deliveries VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(delivery_key) DO UPDATE SET provider_message_id=excluded.provider_message_id,state=excluded.state,error_code=NULL,updated_at=excluded.updated_at",
+      id(),
+      key,
+      kind,
+      receipt.provider,
+      receipt.messageId,
+      receipt.state,
+      null,
+      now(),
+      now(),
+    );
     // A signed event may arrive before the provider's send response returns.
     if (receipt.messageId) reconcileMailEvents(receipt.messageId);
     return receipt.state;
   } catch (error) {
-    const code = error instanceof MailProviderError ? error.code : 'EMAIL_PROVIDER_UNAVAILABLE';
-    run("INSERT INTO mail_deliveries VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(delivery_key) DO UPDATE SET state='failed',error_code=excluded.error_code,updated_at=excluded.updated_at",
-      id(), key, kind, process.env.MAIL_PROVIDER || 'smtp', null, 'failed', code, now(), now());
-    throw new AppError('PROVIDER_UNAVAILABLE', 503, 'Email delivery is temporarily unavailable. Retry later.');
+    const code =
+      error instanceof MailProviderError
+        ? error.code
+        : "EMAIL_PROVIDER_UNAVAILABLE";
+    run(
+      "INSERT INTO mail_deliveries VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(delivery_key) DO UPDATE SET state='failed',error_code=excluded.error_code,updated_at=excluded.updated_at",
+      id(),
+      key,
+      kind,
+      process.env.MAIL_PROVIDER || "smtp",
+      null,
+      "failed",
+      code,
+      now(),
+      now(),
+    );
+    throw new AppError(
+      "PROVIDER_UNAVAILABLE",
+      503,
+      "Email delivery is temporarily unavailable. Retry later.",
+    );
   }
 }
 export function reconcileMailEvents(messageId: string) {
   // Terminal failure is authoritative; late accepted/delayed events cannot undo it.
-  const events = many('SELECT state FROM mail_events WHERE provider_message_id=? ORDER BY occurred_at DESC,created_at DESC', messageId);
-  const final = events.find(e => ['bounced', 'failed', 'complained', 'suppressed'].includes(e.state)) || events.find(e => e.state === 'delivered') || events[0];
-  if (final) run('UPDATE mail_deliveries SET state=?,updated_at=? WHERE provider_message_id=?', final.state, now(), messageId);
+  const events = many(
+    "SELECT state FROM mail_events WHERE provider_message_id=? ORDER BY occurred_at DESC,created_at DESC",
+    messageId,
+  );
+  const final =
+    events.find((e) =>
+      ["bounced", "failed", "complained", "suppressed"].includes(e.state),
+    ) ||
+    events.find((e) => e.state === "delivered") ||
+    events[0];
+  if (final)
+    run(
+      "UPDATE mail_deliveries SET state=?,updated_at=? WHERE provider_message_id=?",
+      final.state,
+      now(),
+      messageId,
+    );
 }
 export async function processNotifications() {
   for (const n of many(
@@ -61,9 +129,17 @@ export async function processNotifications() {
         continue;
       }
       const owner = one(
-        "SELECT email FROM users WHERE workspace_id=?",
+        "SELECT email,settings FROM users WHERE workspace_id=?",
         p.workspace_id,
       );
+      if (
+        owner &&
+        n.recipient === owner.email &&
+        !optionalNotificationAllowed(owner.settings, n.event_key)
+      ) {
+        run("UPDATE notifications SET state='canceled' WHERE id=?", n.id);
+        continue;
+      }
       if (n.recipient !== owner?.email) {
         const m = one(
           "SELECT * FROM members WHERE project_id=? AND email=? AND status='active'",
@@ -95,7 +171,10 @@ export async function processNotifications() {
       }
     }
     try {
-      const state = await sendMail(n.recipient, n.subject, n.body, { kind: 'notification', key: `notification/${n.id}` });
+      const state = await sendMail(n.recipient, n.subject, n.body, {
+        kind: "notification",
+        key: `notification/${n.id}`,
+      });
       run(
         "UPDATE notifications SET state=?,attempts=attempts+1 WHERE id=?",
         state,

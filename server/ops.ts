@@ -3,6 +3,8 @@ import { z } from "zod";
 import { authenticated } from "./auth.js";
 import { AppError, audit, many, requireValue, one, run } from "./db.js";
 import { fresh } from "./domain.js";
+import { retryJob } from "./jobs.js";
+import { reconcileOrder } from "./billing.js";
 export const isOps = (email: string) =>
   (process.env.OPS_EMAILS || "")
     .split(",")
@@ -18,6 +20,61 @@ function operator(req: Request, res: Response, next: NextFunction) {
   next();
 }
 export function installOps(app: Express) {
+  app.get("/api/ops/jobs/:id", authenticated, operator, (req, res) => {
+    const job = requireValue(
+      one(
+        "SELECT id,project_id,type,state,error,attempts,created_at,finished_at FROM jobs WHERE id=?",
+        String(req.params.id),
+      ),
+    );
+    audit(res.locals.user.id, job.project_id, "ops_job_inspected", {
+      jobId: job.id,
+    });
+    res.json(job);
+  });
+  app.post("/api/ops/jobs/:id/retry", authenticated, operator, (req, res) => {
+    const b = z
+      .object({ reason: z.string().trim().min(5).max(500) })
+      .parse(req.body);
+    res
+      .status(202)
+      .json(retryJob(String(req.params.id), res.locals.user.id, b.reason));
+  });
+  app.post(
+    "/api/ops/orders/:id/check",
+    authenticated,
+    operator,
+    async (req, res) => {
+      const b = z
+        .object({ reason: z.string().trim().min(5).max(500) })
+        .parse(req.body);
+      const order = requireValue(
+        one(
+          "SELECT id,project_id FROM orders WHERE id=?",
+          String(req.params.id),
+        ),
+      );
+      audit(res.locals.user.id, order.project_id, "ops_order_check", {
+        orderId: order.id,
+        reason: b.reason,
+      });
+      res.json(await reconcileOrder(order.id, res.locals.user.id));
+    },
+  );
+  app.get("/api/ops/grants/:id", authenticated, operator, (req, res) => {
+    const grant = requireValue(
+      one(
+        "SELECT id,scope,sample,expires_at FROM support_grants WHERE id=? AND revoked_at IS NULL AND expires_at>?",
+        String(req.params.id),
+        Date.now(),
+      ),
+    );
+    audit(res.locals.user.id, null, "support_grant_read", {
+      grantId: grant.id,
+      scope: grant.scope,
+    });
+    res.json(grant);
+  });
   app.get("/api/ops", authenticated, operator, (req, res) => {
     audit(res.locals.user.id, null, "ops_diagnostics_read");
     res.json({
@@ -38,6 +95,9 @@ export function installOps(app: Express) {
       ),
       requests: many(
         "SELECT id,kind,status,created_at FROM support_requests ORDER BY created_at DESC LIMIT 100",
+      ),
+      grants: many(
+        "SELECT id,scope,expires_at,revoked_at,created_at FROM support_grants ORDER BY created_at DESC LIMIT 100",
       ),
     });
   });

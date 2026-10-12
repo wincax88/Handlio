@@ -41,6 +41,7 @@ import { Metric, UsageBar } from "./Prototype";
 import { Editor } from "./Editor";
 import { Assets } from "./Assets";
 import { Handbook, Releases, Handoff, Exports } from "./ProjectTools";
+import { DraftMerge } from "./Comparison";
 export type ProjectEditorProps = {
   project: Project;
   draft: Draft;
@@ -354,50 +355,50 @@ export function ProjectPage({
             Compare server draft
           </Button>
           {compare && (
-            <div className="form-grid">
-              <Field label={`Server copy · revision ${compare.revision}`}>
-                <textarea
-                  rows={12}
-                  readOnly
-                  value={JSON.stringify(compare.draft, null, 2)}
-                />
-              </Field>
-              <Field label="Your draft · preserved in memory">
-                <textarea
-                  rows={12}
-                  readOnly
-                  value={JSON.stringify(draft, null, 2)}
-                />
-              </Field>
-            </div>
-          )}
-          {compare && (
-            <Button
-              onClick={() => {
+            <DraftMerge
+              key={compare.revision}
+              base={JSON.parse(persisted.current)}
+              local={draft}
+              server={compare.draft}
+              busy={false}
+              onSave={async (merged) => {
+                latest.current = merged;
+                setDraft(merged);
                 revision.current = compare.revision;
+                setP({ ...compare, draft: merged });
                 blocked.current = false;
                 dirty.current = true;
-                setCompare(null);
                 setStatus("unsaved");
-                setError(null);
+                try {
+                  await flush();
+                  setCompare(null);
+                } catch {}
+              }}
+              onDiscard={() => {
+                if (
+                  window.confirm(
+                    "Discard your local changes and use the saved server draft?",
+                  )
+                )
+                  void refresh();
+              }}
+            />
+          )}
+          {!compare && (
+            <Button
+              kind="text"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Discard your local draft and reload the saved server version?",
+                  )
+                )
+                  void refresh();
               }}
             >
-              Use server revision as merge base
+              Discard local changes and reload
             </Button>
           )}
-          <Button
-            kind="text"
-            onClick={() => {
-              if (
-                window.confirm(
-                  "Discard your local draft and reload the saved server version?",
-                )
-              )
-                void refresh();
-            }}
-          >
-            Discard local changes and reload
-          </Button>
         </div>
       )}
       {!editable && (

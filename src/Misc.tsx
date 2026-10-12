@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 import { UsageBar } from "./Prototype";
 import type { Project, Session } from "./types";
-import { api, formatDate, send } from "./api";
+import { api, formatDate, navigate, send } from "./api";
+import { WorkspaceForm, AccountControls } from "./Workspace";
+import { Operations } from "./Operations";
 import {
   Back,
   Badge,
@@ -34,6 +36,7 @@ export function Billing({ session }: { session: Session }) {
   const [checkout, setCheckout] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [renewalAcknowledged, setRenewalAcknowledged] = useState(false);
   const [purchaseOpen, setPurchaseOpen] = useState(
     new URLSearchParams(location.search).has("project"),
   );
@@ -73,6 +76,7 @@ export function Billing({ session }: { session: Session }) {
     p.entitlement.expiresAt > Date.now();
   function select(id: string) {
     setPid(id);
+    setRenewalAcknowledged(false);
     setCheckout(null);
     setPurchaseOpen(true);
     requestAnimationFrame(() =>
@@ -186,6 +190,7 @@ export function Billing({ session }: { session: Session }) {
                     value={pid}
                     onChange={(e) => {
                       setPid(e.target.value);
+                      setRenewalAcknowledged(false);
                       setCheckout(null);
                     }}
                   >
@@ -223,10 +228,23 @@ export function Billing({ session }: { session: Session }) {
                   The final period starts at verified payment time. Applicable
                   taxes are shown by the payment provider at checkout.
                 </p>
+                {renewal && (
+                  <label className="check-field">
+                    <input
+                      type="checkbox"
+                      checked={renewalAcknowledged}
+                      onChange={(e) => setRenewalAcknowledged(e.target.checked)}
+                    />
+                    I understand this extends hosting only, is not automatic,
+                    and does not add AI credits. Sharing does not reopen
+                    automatically.
+                  </label>
+                )}
                 <Button
                   disabled={
                     busy ||
                     !p ||
+                    (!!renewal && !renewalAcknowledged) ||
                     ["expired", "revoked"].includes(p.entitlement.state) ||
                     p.lifecycle !== "active"
                   }
@@ -237,7 +255,13 @@ export function Billing({ session }: { session: Session }) {
                         product: renewal ? "renewal" : "project",
                       });
                       setCheckout(c);
-                      if (c.url) location.assign(c.url);
+                      if (c.url) {
+                        sessionStorage.setItem(
+                          `checkout:${c.orderId}`,
+                          "started",
+                        );
+                        location.assign(c.url);
+                      }
                     })
                   }
                 >
@@ -263,6 +287,7 @@ export function Billing({ session }: { session: Session }) {
                           await send("/billing/local-confirm", {
                             orderId: checkout.orderId,
                           });
+                          navigate(`/app/payment/${checkout.orderId}`);
                           setCheckout(null);
                         })
                       }
@@ -349,7 +374,10 @@ export function Billing({ session }: { session: Session }) {
                           </Badge>
                         </td>
                         <td>
-                          <Link to="/app/help" className="button secondary">
+                          <Link
+                            to={`/app/payment/${o.id}`}
+                            className="button secondary"
+                          >
                             Details / support
                           </Link>
                           {session.localMode && o.status === "paid" && (
@@ -454,140 +482,17 @@ export function SettingsPage({
   session: Session;
   refresh: () => Promise<void>;
 }) {
-  const [settings, setSettings] = useState(session.user!.settings);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
   return (
     <div className="settings-page">
       <PageHeading
         eyebrow="YOUR WORKSPACE"
         title="Settings & account"
-        description="Manage the defaults your projects start with and protect your account."
+        description="Manage your workspace, notifications, devices and data."
       />
-      <ErrorNotice error={error} />
-      <Panel title="Workspace defaults">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setBusy(true);
-            setError(null);
-            void send("/settings", settings, "PATCH")
-              .then(async () => {
-                await refresh();
-                setMessage("Workspace settings saved.");
-              })
-              .catch((e) => setError(e.message))
-              .finally(() => setBusy(false));
-          }}
-        >
-          <Field label="Workspace name">
-            <input
-              required
-              maxLength={120}
-              value={settings.name}
-              onChange={(e) =>
-                setSettings((v) => ({ ...v, name: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Support email">
-            <input
-              type="email"
-              value={settings.supportEmail}
-              onChange={(e) =>
-                setSettings((v) => ({ ...v, supportEmail: e.target.value }))
-              }
-            />
-          </Field>
-          <Field label="Display time zone">
-            <select
-              value={settings.timezone}
-              onChange={(e) =>
-                setSettings((v) => ({ ...v, timezone: e.target.value }))
-              }
-            >
-              {[
-                "UTC",
-                "Asia/Shanghai",
-                "Asia/Tokyo",
-                "America/New_York",
-                "America/Los_Angeles",
-                "Europe/London",
-                "Europe/Berlin",
-                "Australia/Sydney",
-              ].map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-          </Field>
-          <label className="check-field">
-            <input
-              type="checkbox"
-              checked={settings.expiryReminders}
-              onChange={(e) =>
-                setSettings((v) => ({
-                  ...v,
-                  expiryReminders: e.target.checked,
-                }))
-              }
-            />
-            Send optional hosting expiry reminders
-          </label>
-          <Button type="submit" disabled={busy}>
-            Save settings
-          </Button>
-          {message && (
-            <p role="status" className="success-text">
-              {message}
-            </p>
-          )}
-        </form>
+      <Panel title="Workspace details">
+        <WorkspaceForm session={session} refresh={refresh} />
       </Panel>
-      <Panel title="Session & security">
-        <dl className="detail-list">
-          <div>
-            <dt>Verified email</dt>
-            <dd>{session.user!.email}</dd>
-          </div>
-          <div>
-            <dt>Interface language</dt>
-            <dd>English · Unicode content supported</dd>
-          </div>
-        </dl>
-        <div className="action-row">
-          <Link to="/auth?reauth=1" className="button secondary">
-            Verify for sensitive actions
-          </Link>
-          <Button
-            kind="secondary"
-            onClick={async () => {
-              try {
-                await send("/auth/logout-others", {});
-                setMessage("Other sessions signed out.");
-              } catch (e) {
-                setError((e as Error).message);
-              }
-            }}
-          >
-            Sign out other sessions
-          </Button>
-        </div>
-      </Panel>
-      <Panel title="Your data">
-        <p>
-          Use the project’s export center to download published content. Project
-          deletion is available in its overview after recent email verification.
-        </p>
-        <p>
-          For account-wide export, correction, deletion or a privacy concern,
-          submit a request. You will receive a reference number and can check
-          its status.
-        </p>
-        <Link to="/app/help" className="button secondary">
-          Submit a data request <ArrowRight size={16} />
-        </Link>
-      </Panel>
+      <AccountControls session={session} refresh={refresh} />
     </div>
   );
 }
@@ -598,9 +503,18 @@ export function Help({
   session: Session;
   embedded?: boolean;
 }) {
-  const [kind, setKind] = useState("help");
+  const [kind, setKind] = useState(
+    new URLSearchParams(location.search).get("kind") === "refund"
+      ? "refund"
+      : "help",
+  );
   const [email, setEmail] = useState(session.user?.email || "");
-  const [body, setBody] = useState("");
+  const [body, setBody] = useState(
+    new URLSearchParams(location.search).has("order")
+      ? `Order reference: ${new URLSearchParams(location.search).get("order")}\n\n`
+      : "",
+  );
+  const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState<any>(null);
   const [requests, setRequests] = useState<any[]>([]);
@@ -611,6 +525,36 @@ export function Help({
         .then(setRequests)
         .catch(() => {});
   }, [request]);
+  const articles = [
+    [
+      "Prepare & redact screenshots",
+      "Choose static PNG, JPEG or WebP images. Review them locally for passwords, keys, personal data, balances and client secrets. Draw solid redaction boxes. Confirm each screenshot before uploading; the uploaded pixels are flattened and cannot be recovered here.",
+    ],
+    [
+      "Create & publish a handbook",
+      "Add the goal, prerequisites, audience and completion criteria for each guide. Write instructions and expected results, then mark each step reviewed. Add support details and a handoff checklist. Run the publishing check, activate your package, and publish a version.",
+    ],
+    [
+      "Invite & verify a client",
+      "Enable sharing, invite the client’s email, and choose Viewer, Reviewer or Confirmer. The client verifies the invited email using a one-time code. A forwarded invitation alone does not grant access. Invitations expire after 7 days.",
+    ],
+    [
+      "Questions & version receipt",
+      "Feedback and receipt records belong to a specific release. Resolve blocking questions before requesting or recording receipt. A new version does not inherit earlier confirmation. Receipt is not an electronic contract signature.",
+    ],
+    [
+      "Download & offline reading",
+      "Export a published version as PDF or a complete offline HTML ZIP. Extract the whole ZIP and open index.html. Online login is required to ask questions or confirm receipt. Disabling downloads cannot prevent screenshots or copies already saved.",
+    ],
+    [
+      "Hosting, expiry & deletion",
+      "The trial project price is $19 for 90 days from verified payment. Renewal is $9 for another 90 days; there is no automatic renewal and no extra AI allowance. Clients lose access at expiry. Owners retain a 30-day read and export grace window, followed by content cleanup.",
+    ],
+    [
+      "Report a safety issue",
+      "Pause sharing or use a security withdrawal in the version center. A security withdrawal isolates related images and exports. Existing downloaded files cannot be recalled. Rotate any exposed credentials through their original provider.",
+    ],
+  ];
   const content = (
     <>
       <PageHeading
@@ -620,41 +564,32 @@ export function Help({
       />
       <div className="help-grid">
         <div className="help-articles">
-          {[
-            [
-              "Prepare & redact screenshots",
-              "Choose static PNG, JPEG or WebP images. Review them locally for passwords, keys, personal data, balances and client secrets. Draw solid redaction boxes. Confirm each screenshot before uploading; the uploaded pixels are flattened and cannot be recovered here.",
-            ],
-            [
-              "Create & publish a handbook",
-              "Add the goal, prerequisites, audience and completion criteria for each guide. Write instructions and expected results, then mark each step reviewed. Add support details and a handoff checklist. Run the publishing check, activate your package, and publish a version.",
-            ],
-            [
-              "Invite & verify a client",
-              "Enable sharing, invite the client’s email, and choose Viewer, Reviewer or Confirmer. The client verifies the invited email using a one-time code. A forwarded invitation alone does not grant access. Invitations expire after 7 days.",
-            ],
-            [
-              "Questions & version receipt",
-              "Feedback and receipt records belong to a specific release. Resolve blocking questions before requesting or recording receipt. A new version does not inherit earlier confirmation. Receipt is not an electronic contract signature.",
-            ],
-            [
-              "Download & offline reading",
-              "Export a published version as PDF or a complete offline HTML ZIP. Extract the whole ZIP and open index.html. Online login is required to ask questions or confirm receipt. Disabling downloads cannot prevent screenshots or copies already saved.",
-            ],
-            [
-              "Hosting, expiry & deletion",
-              "The trial project price is $19 for 90 days from verified payment. Renewal is $9 for another 90 days; there is no automatic renewal and no extra AI allowance. Clients lose access at expiry. Owners retain a 30-day read and export grace window, followed by content cleanup.",
-            ],
-            [
-              "Report a safety issue",
-              "Pause sharing or use a security withdrawal in the version center. A security withdrawal isolates related images and exports. Existing downloaded files cannot be recalled. Rotate any exposed credentials through their original provider.",
-            ],
-          ].map(([title, text]) => (
-            <details key={title}>
-              <summary>{title}</summary>
-              <p>{text}</p>
-            </details>
-          ))}
+          <p role="status">
+            {
+              articles.filter(([title, text]) =>
+                `${title} ${text}`.toLowerCase().includes(search.toLowerCase()),
+              ).length
+            }{" "}
+            matching help articles
+          </p>
+          <Field label="Search help">
+            <input
+              type="search"
+              placeholder="Search guides, sharing, billing…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </Field>
+          {articles
+            .filter(([title, text]) =>
+              `${title} ${text}`.toLowerCase().includes(search.toLowerCase()),
+            )
+            .map(([title, text]) => (
+              <details key={title}>
+                <summary>{title}</summary>
+                <p>{text}</p>
+              </details>
+            ))}
         </div>
         <Panel title="Get help or request your data">
           <ErrorNotice error={error} />
@@ -857,49 +792,5 @@ export function Policy({ kind, session }: { kind: string; session: Session }) {
   );
 }
 export function Ops() {
-  const [data, setData] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    void api("/ops")
-      .then(setData)
-      .catch((e) => setError(e.message));
-  }, []);
-  return (
-    <div className="public-document">
-      <Back to="/app/projects">Creator workspace</Back>
-      <PageHeading
-        eyebrow="METADATA ONLY"
-        title="Operations diagnostics"
-        description="Task and order states. Client content, screenshots, emails and receipt records are excluded."
-      />
-      <ErrorNotice error={error} />
-      {data &&
-        Object.entries(data).map(([kind, rows]) => (
-          <Panel key={kind} title={kind}>
-            {(rows as any[]).length === 0 ? (
-              <p>No records.</p>
-            ) : (
-              (rows as any[]).map((row) => (
-                <div className="request-row" key={row.id}>
-                  <span>
-                    {row.id.slice(0, 12)} ·{" "}
-                    {row.type || row.kind || row.currency || kind}
-                  </span>
-                  <Badge>{row.state || row.status}</Badge>
-                  <small>
-                    {row.error ||
-                      (row.amount != null
-                        ? `${row.amount} minor units`
-                        : `${row.attempts || 0} attempts`)}
-                  </small>
-                </div>
-              ))
-            )}
-          </Panel>
-        ))}
-      <Link to="/auth?reauth=1" className="button secondary">
-        Reverify for operations access
-      </Link>
-    </div>
-  );
+  return <Operations />;
 }

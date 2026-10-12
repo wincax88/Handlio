@@ -40,6 +40,7 @@ import {
 } from "./ui";
 import { Manual } from "./Reader";
 import { Metric } from "./Prototype";
+import { VersionComparison } from "./Comparison";
 export async function waitJob(jid: string) {
   for (let i = 0; i < 185; i++) {
     await new Promise((r) => setTimeout(r, 1000));
@@ -66,6 +67,7 @@ export function Handbook({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [logoAssets, setLogoAssets] = useState<any[]>([]);
+  const [previewMode, setPreviewMode] = useState("desktop");
   useEffect(() => {
     void api(`/projects/${p.id}/assets`)
       .then(setLogoAssets)
@@ -103,7 +105,21 @@ export function Handbook({
       />
       <ErrorNotice error={error} />
       {preview ? (
-        <div className="draft-preview">
+        <div className={`draft-preview preview-${previewMode}`}>
+          <div className="action-row preview-controls">
+            <Button
+              kind={previewMode === "desktop" ? "" : "secondary"}
+              onClick={() => setPreviewMode("desktop")}
+            >
+              Desktop
+            </Button>
+            <Button
+              kind={previewMode === "mobile" ? "" : "secondary"}
+              onClick={() => setPreviewMode("mobile")}
+            >
+              Mobile
+            </Button>
+          </div>
           <Badge tone="amber">
             Owner draft preview · not a published version
           </Badge>
@@ -578,14 +594,17 @@ function ValidationResult({
 }
 export function Releases({
   project: p,
+  draft,
   flush,
   refresh,
   session,
+  saved,
 }: ProjectEditorProps) {
   const [releases, setReleases] = useState<Release[]>([]);
   const [check, setCheck] = useState<any>(null);
   const [summary, setSummary] = useState("");
   const [warningReason, setWarningReason] = useState("");
+  const [warningAccepted, setWarningAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [withdraw, setWithdraw] = useState<string | null>(null);
@@ -655,14 +674,24 @@ export function Releases({
             />
           </Field>
           {check?.warnings.length > 0 && (
-            <Field label="Reason for accepting the warnings">
-              <textarea
-                rows={2}
-                value={warningReason}
-                maxLength={1000}
-                onChange={(e) => setWarningReason(e.target.value)}
-              />
-            </Field>
+            <>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={warningAccepted}
+                  onChange={(e) => setWarningAccepted(e.target.checked)}
+                />
+                I reviewed these warnings and accept them for this release.
+              </label>
+              <Field label="Reason for accepting the warnings">
+                <textarea
+                  rows={2}
+                  value={warningReason}
+                  maxLength={1000}
+                  onChange={(e) => setWarningReason(e.target.value)}
+                />
+              </Field>
+            </>
           )}
           <div className="action-row">
             <Button
@@ -672,6 +701,8 @@ export function Releases({
                 void action(async () => {
                   await flush();
                   setCheck(await send(`/projects/${p.id}/validate`, {}));
+                  setWarningAccepted(false);
+                  setWarningReason("");
                 })
               }
             >
@@ -682,9 +713,12 @@ export function Releases({
               disabled={
                 busy ||
                 !summary.trim() ||
+                !saved ||
                 !check ||
+                check.revision !== p.revision ||
                 check.blockers.length > 0 ||
-                (check.warnings.length > 0 && !warningReason.trim())
+                (check.warnings.length > 0 &&
+                  (!warningAccepted || !warningReason.trim()))
               }
               onClick={() => void action(publish)}
             >
@@ -713,6 +747,15 @@ export function Releases({
         </div>
       </div>
       <h2 className="section-title">Version history</h2>
+      {releases.length > 0 && (
+        <VersionComparison
+          key={releases.map((r) => r.id).join(":")}
+          releases={releases}
+          draft={draft}
+          projectName={p.name}
+          clientName={p.clientName}
+        />
+      )}
       {!releases.length ? (
         <Panel>
           <Empty
@@ -850,8 +893,16 @@ export function Handoff({
   const [localInvite, setLocalInvite] = useState("");
   const [resolutions, setResolutions] = useState<Record<string, string>>({});
   const [reply, setReply] = useState<Record<string, string>>({});
+  const [questionFilter, setQuestionFilter] = useState("open");
+  const [resolutionVersions, setResolutionVersions] = useState<
+    Record<string, string>
+  >({});
+  const [versions, setVersions] = useState<Release[]>([]);
+  const [invitations, setInvitations] = useState<any[]>([]);
+  const [linkMessage, setLinkMessage] = useState("");
   async function load() {
     setData(await api(`/projects/${p.id}/handoff`));
+    setVersions(await api(`/projects/${p.id}/releases`));
   }
   useEffect(() => {
     void load().catch((e) => setError(e.message));
@@ -876,20 +927,46 @@ export function Handoff({
         title="A clear handoff, together."
         description="Invite the right people. Keep questions and receipts tied to a version."
         actions={
-          <Button
-            disabled={!p.sharing}
-            onClick={() =>
-              document
-                .getElementById("invite-client")
-                ?.scrollIntoView({ behavior: "smooth" })
-            }
-          >
-            <Users size={16} />
-            Invite client
-          </Button>
+          <>
+            <Button
+              kind="secondary"
+              disabled={!p.currentRelease}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(
+                    `${location.origin}/h/${p.publicId}`,
+                  );
+                  setLinkMessage(
+                    "Invited-client link copied. Email verification is required.",
+                  );
+                } catch {
+                  setLinkMessage(
+                    `Copy this link: ${location.origin}/h/${p.publicId}`,
+                  );
+                }
+              }}
+            >
+              Copy invited-client link
+            </Button>
+            <Link to={`/h/${p.publicId}`} className="button secondary">
+              Preview as a client
+            </Link>
+            <Button
+              disabled={!p.sharing}
+              onClick={() =>
+                document
+                  .getElementById("invite-client")
+                  ?.scrollIntoView({ behavior: "smooth" })
+              }
+            >
+              <Users size={16} />
+              Invite client
+            </Button>
+          </>
         }
       />
       <ErrorNotice error={error} />
+      {linkMessage && <p role="status">{linkMessage}</p>}
       <div className="sharing-strip">
         <div>
           <ShieldCheck size={20} />
@@ -964,19 +1041,30 @@ export function Handoff({
                   onSubmit={(e) => {
                     e.preventDefault();
                     void action(async () => {
+                      const emails = email.split(/[\s,;]+/).filter(Boolean);
                       const result = await send(`/projects/${p.id}/invites`, {
-                        email,
+                        emails,
                         role,
                         download,
                       });
-                      setLocalInvite(result.localInviteUrl || "");
+                      setLocalInvite(
+                        result.localInviteUrl ||
+                          (result.invitations?.length === 1
+                            ? result.invitations[0].localInviteUrl
+                            : "") ||
+                          "",
+                      );
+                      setInvitations(result.invitations || [result]);
                       setEmail("");
                     });
                   }}
                 >
-                  <Field label="Client email">
-                    <input
-                      type="email"
+                  <Field
+                    label="Client email"
+                    hint="One per line or separated by commas. Up to 10 emails per batch; duplicates are sent once."
+                  >
+                    <textarea
+                      rows={3}
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
@@ -1022,6 +1110,32 @@ export function Handoff({
                         <ArrowUpRight size={12} />
                       </a>
                     </span>
+                  </div>
+                )}
+                {invitations.length > 0 && (
+                  <div role="status">
+                    <p>
+                      {invitations.length} invitation
+                      {invitations.length === 1 ? "" : "s"} queued.
+                    </p>
+                    {invitations.map((invite) => (
+                      <p key={invite.id}>
+                        {invite.email}
+                        {invite.localInviteUrl && (
+                          <>
+                            {" "}
+                            ·{" "}
+                            <a
+                              href={invite.localInviteUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open local invitation
+                            </a>
+                          </>
+                        )}
+                      </p>
+                    ))}
                   </div>
                 )}
               </Panel>
@@ -1212,6 +1326,11 @@ export function Handoff({
                   </div>
                   <Badge tone={r.status === "confirmed" ? "green" : "neutral"}>
                     {r.status}
+                    {r.due_at &&
+                    new Date(r.due_at + "T23:59:59Z").getTime() < Date.now() &&
+                    ["pending", "in_progress"].includes(r.status)
+                      ? " · Overdue"
+                      : ""}
                   </Badge>
                   <Button
                     kind="text"
@@ -1231,6 +1350,22 @@ export function Handoff({
             )}
           </Panel>
           <Panel title="Client questions">
+            <Field label="Question status">
+              <select
+                value={questionFilter}
+                onChange={(e) => setQuestionFilter(e.target.value)}
+              >
+                <option value="open">Open</option>
+                <option value="resolved">Resolved</option>
+                <option value="withdrawn">Withdrawn</option>
+                <option value="all">All questions</option>
+              </select>
+            </Field>
+            {data.questions.length > 0 &&
+              !data.questions.some(
+                (q: any) =>
+                  questionFilter === "all" || q.status === questionFilter,
+              ) && <p>No {questionFilter} questions.</p>}
             {!data.questions.length ? (
               <Empty
                 title="All quiet, for now."
@@ -1238,98 +1373,138 @@ export function Handoff({
                 icon={<MessageSquare size={24} />}
               />
             ) : (
-              data.questions.map((q: any) => (
-                <article className="question-card" key={q.id}>
-                  <div className="action-row">
-                    <Badge tone={q.status === "open" ? "amber" : "green"}>
-                      {q.status}
-                    </Badge>
-                    {!!q.blocking && (
-                      <Badge tone="red">Blocks confirmation</Badge>
-                    )}
-                    <small>
-                      {formatDate(
-                        q.created_at,
-                        session.user!.settings.timezone,
+              data.questions
+                .filter(
+                  (q: any) =>
+                    questionFilter === "all" || q.status === questionFilter,
+                )
+                .map((q: any) => (
+                  <article className="question-card" key={q.id}>
+                    <div className="action-row">
+                      <Badge tone={q.status === "open" ? "amber" : "green"}>
+                        {q.status}
+                      </Badge>
+                      {!!q.blocking && (
+                        <Badge tone="red">Blocks confirmation</Badge>
                       )}
-                    </small>
-                  </div>
-                  <p>{q.body}</p>
-                  <small>
-                    Release {q.release_id.slice(0, 8)}
-                    {q.step_id ? ` · Step ${q.step_id.slice(0, 8)}` : ""}
-                  </small>
-                  {q.replies.map((r: any) => (
-                    <div className="reply" key={r.id}>
-                      {r.body}
+                      <small>
+                        {formatDate(
+                          q.created_at,
+                          session.user!.settings.timezone,
+                        )}
+                      </small>
                     </div>
-                  ))}
-                  {q.status === "open" && (
-                    <>
-                      <Field label="Reply">
-                        <textarea
-                          rows={2}
-                          maxLength={2000}
-                          value={reply[q.id] || ""}
-                          onChange={(e) =>
-                            setReply((v) => ({ ...v, [q.id]: e.target.value }))
+                    <p>{q.body}</p>
+                    <small>
+                      Version v{q.version}
+                      {q.step_id ? ` · Step ${q.step_id.slice(0, 8)}` : ""}
+                    </small>
+                    <a
+                      className="button text"
+                      href={`/h/${p.publicId}?release=${q.release_id}#${q.step_id ? `step-${q.step_id}` : "handbook-overview"}`}
+                    >
+                      View the referenced {q.step_id ? "step" : "version"}
+                    </a>
+                    {q.replies.map((r: any) => (
+                      <div className="reply" key={r.id}>
+                        {r.body}
+                      </div>
+                    ))}
+                    {q.status === "open" && (
+                      <>
+                        <Field label="Reply">
+                          <textarea
+                            rows={2}
+                            maxLength={2000}
+                            value={reply[q.id] || ""}
+                            onChange={(e) =>
+                              setReply((v) => ({
+                                ...v,
+                                [q.id]: e.target.value,
+                              }))
+                            }
+                          />
+                        </Field>
+                        <Button
+                          kind="text"
+                          disabled={busy || !reply[q.id]?.trim()}
+                          onClick={() =>
+                            void action(async () => {
+                              await send(`/questions/${q.id}/replies`, {
+                                body: reply[q.id],
+                              });
+                              setReply((v) => ({ ...v, [q.id]: "" }));
+                            })
                           }
-                        />
-                      </Field>
-                      <Button
-                        kind="text"
-                        disabled={busy || !reply[q.id]?.trim()}
-                        onClick={() =>
-                          void action(async () => {
-                            await send(`/questions/${q.id}/replies`, {
-                              body: reply[q.id],
-                            });
-                            setReply((v) => ({ ...v, [q.id]: "" }));
-                          })
-                        }
-                      >
-                        Send reply
-                      </Button>
-                      <Field label="Resolution note">
-                        <textarea
-                          rows={2}
-                          maxLength={2000}
-                          value={resolutions[q.id] || ""}
-                          onChange={(e) =>
-                            setResolutions((v) => ({
-                              ...v,
-                              [q.id]: e.target.value,
-                            }))
+                        >
+                          Send reply
+                        </Button>
+                        <Field label="Resolution note">
+                          <textarea
+                            rows={2}
+                            maxLength={2000}
+                            value={resolutions[q.id] || ""}
+                            onChange={(e) =>
+                              setResolutions((v) => ({
+                                ...v,
+                                [q.id]: e.target.value,
+                              }))
+                            }
+                            placeholder="Explain how this was resolved. It remains attached to its original version."
+                          />
+                        </Field>
+                        <Field label="Resolved by">
+                          <select
+                            value={resolutionVersions[q.id] || "reply"}
+                            onChange={(e) =>
+                              setResolutionVersions({
+                                ...resolutionVersions,
+                                [q.id]: e.target.value,
+                              })
+                            }
+                          >
+                            <option value="reply">
+                              Reply only — no new release
+                            </option>
+                            {versions
+                              .filter((v) => v.status === "published")
+                              .map((v) => (
+                                <option key={v.id} value={v.id}>
+                                  Version v{v.version} · {v.summary}
+                                </option>
+                              ))}
+                          </select>
+                        </Field>
+                        <Button
+                          kind="secondary"
+                          disabled={busy || !resolutions[q.id]?.trim()}
+                          onClick={() =>
+                            void action(async () => {
+                              await send(
+                                `/questions/${q.id}`,
+                                {
+                                  status: "resolved",
+                                  resolution: resolutions[q.id],
+                                  resolvedReleaseId:
+                                    resolutionVersions[q.id] &&
+                                    resolutionVersions[q.id] !== "reply"
+                                      ? resolutionVersions[q.id]
+                                      : null,
+                                },
+                                "PATCH",
+                              );
+                            })
                           }
-                          placeholder="Explain how this was resolved. It remains attached to its original version."
-                        />
-                      </Field>
-                      <Button
-                        kind="secondary"
-                        disabled={busy || !resolutions[q.id]?.trim()}
-                        onClick={() =>
-                          void action(async () => {
-                            await send(
-                              `/questions/${q.id}`,
-                              {
-                                status: "resolved",
-                                resolution: resolutions[q.id],
-                                resolvedReleaseId: p.currentRelease?.id || null,
-                              },
-                              "PATCH",
-                            );
-                          })
-                        }
-                      >
-                        Mark resolved
-                      </Button>
-                    </>
-                  )}
-                  {q.resolution && (
-                    <p className="resolution">Resolution: {q.resolution}</p>
-                  )}
-                </article>
-              ))
+                        >
+                          Mark resolved
+                        </Button>
+                      </>
+                    )}
+                    {q.resolution && (
+                      <p className="resolution">Resolution: {q.resolution}</p>
+                    )}
+                  </article>
+                ))
             )}
           </Panel>
           <details className="delivery-status">
@@ -1355,9 +1530,11 @@ export function Exports({ project: p, session }: ProjectEditorProps) {
   const [paper, setPaper] = useState("A4");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [usage, setUsage] = useState(p.entitlement);
   async function load() {
     setJobs(await api(`/projects/${p.id}/jobs`));
     setReleases(await api(`/projects/${p.id}/releases`));
+    setUsage((await api(`/projects/${p.id}`)).entitlement);
   }
   useEffect(() => {
     void load().catch((e) => setError(e.message));
@@ -1392,6 +1569,18 @@ export function Exports({ project: p, session }: ProjectEditorProps) {
         description="Portable files generated from a published version. No comments, client emails, or internal notes."
       />
       <ErrorNotice error={error} />
+      <div className="export-allowance">
+        <strong>Export allowance</strong>
+        <span>
+          Current window: {usage.exportsUsed} /{" "}
+          {usage.state === "expired_grace" ? 10 : usage.limits.exports}
+        </span>
+        <span>Today: {usage.exportsToday} / 10</span>
+        <small>
+          Failed jobs do not use successful-export allowance. Valid cached
+          downloads do not use a new export.
+        </small>
+      </div>
       <div className="export-layout">
         <Panel title="Prepare an export">
           <Field label="Published version">
@@ -1470,12 +1659,17 @@ export function Exports({ project: p, session }: ProjectEditorProps) {
                 <FileText size={23} />
                 <div>
                   <strong>
-                    {j.output?.format === "html"
+                    {j.format === "html"
                       ? "Offline HTML ZIP"
-                      : j.output?.format === "pdf"
+                      : j.format === "pdf"
                         ? "PDF handbook"
                         : "Preparing export"}
                   </strong>
+                  <small>
+                    Version v
+                    {releases.find((r) => r.id === j.releaseId)?.version || "—"}
+                    {j.format === "pdf" ? ` · ${j.paper}` : " · HTML ZIP"}
+                  </small>
                   <small>
                     {formatDate(j.created_at, session.user!.settings.timezone)}
                     {j.output?.bytes
@@ -1483,6 +1677,15 @@ export function Exports({ project: p, session }: ProjectEditorProps) {
                       : ""}
                   </small>
                   {j.error && <small className="danger-text">{j.error}</small>}
+                  {j.availableUntil && (
+                    <small>
+                      Available until{" "}
+                      {formatDate(
+                        j.availableUntil,
+                        session.user!.settings.timezone,
+                      )}
+                    </small>
+                  )}
                 </div>
                 <Badge
                   tone={
@@ -1495,6 +1698,48 @@ export function Exports({ project: p, session }: ProjectEditorProps) {
                 >
                   {j.state}
                 </Badge>
+                {j.state === "failed" && (
+                  <Button
+                    kind="secondary"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      setError(null);
+                      try {
+                        const retry = await send(`/jobs/${j.id}/retry`, {
+                          reason:
+                            "Retry failed export after reviewing the error",
+                        });
+                        await load();
+                        await waitJob(retry.jobId);
+                        await load();
+                      } catch (e) {
+                        setError((e as Error).message);
+                        await load();
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    Retry export
+                  </Button>
+                )}
+                {j.state === "expired" && (
+                  <Button
+                    kind="secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      setRid(j.releaseId);
+                      setFormat(j.format);
+                      setPaper(j.paper || "A4");
+                      document
+                        .querySelector(".export-layout")
+                        ?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  >
+                    Generate again
+                  </Button>
+                )}
                 {j.state === "succeeded" && (
                   <>
                     <a

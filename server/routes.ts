@@ -3,6 +3,7 @@ import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { writeFile, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
+import { copyFileSync } from "node:fs";
 import { imageSlot, sanitizeImage } from "./image.js";
 import {
   AppError,
@@ -41,6 +42,7 @@ import {
   type Role,
 } from "../shared/model.js";
 import { notify, origin } from "./providers.js";
+import { settingsSchema, workspaceSettings } from "../shared/workspace.js";
 const param = (r: Request, key = "id") => String(r.params[key]);
 const key = (r: Request) =>
   String(r.get("idempotency-key") || r.body?.idempotencyKey || "");
@@ -130,6 +132,33 @@ export function installRoutes(app: Express) {
         now(),
       );
       audit(u.id, pid, "project_created", { template: b.template });
+      if (settings.logoId) {
+        const logo = one(
+          "SELECT a.* FROM assets a JOIN projects p ON p.id=a.project_id WHERE a.id=? AND p.workspace_id=? AND p.lifecycle!='deleted' AND a.status='ready'",
+          settings.logoId,
+          u.workspace_id,
+        );
+        if (logo) {
+          const logoId = id();
+          copyFileSync(
+            path.join(dataDir, `${logo.id}.png`),
+            path.join(dataDir, `${logoId}.png`),
+          );
+          run(
+            "INSERT INTO assets VALUES (?,?,?,?,?,?,?,?)",
+            logoId,
+            pid,
+            logo.hash,
+            logo.bytes,
+            logo.width,
+            logo.height,
+            "ready",
+            now(),
+          );
+          d.logoId = logoId;
+          run("UPDATE projects SET draft=? WHERE id=?", JSON.stringify(d), pid);
+        }
+      }
       return { id: pid };
     });
     res.status(201).json(result);
@@ -747,7 +776,7 @@ export function installRoutes(app: Express) {
         p.id,
       ),
       questions: many(
-        "SELECT * FROM questions WHERE project_id=? ORDER BY created_at DESC",
+        "SELECT q.*,r.version AS version FROM questions q JOIN releases r ON r.id=q.release_id WHERE q.project_id=? ORDER BY q.created_at DESC",
         p.id,
       ).map((q) => ({
         ...q,
@@ -771,82 +800,92 @@ export function installRoutes(app: Express) {
     paid(p);
     const b = z
       .object({
-        email: emailSchema,
+        email: emailSchema.optional(),
+        emails: z.array(emailSchema).min(1).max(10).optional(),
         role: z.enum(["Viewer", "Reviewer", "Confirmer"]),
         download: z.boolean(),
       })
+      .refine(
+        (v) => !!v.email !== !!v.emails,
+        "Provide one email or a batch of 1–10 emails.",
+      )
       .parse(req.body);
+    const emails = [...new Set(b.emails || [b.email!])];
     if (!p.sharing || !p.current_release_id)
       throw new AppError(
         "SHARING_PAUSED",
         409,
         "Publish a version and enable sharing first.",
       );
-    if (b.email === me(res).email)
+    if (emails.includes(me(res).email))
       throw new AppError(
         "INVALID_MEMBER",
         400,
         "Invite a client email rather than your own creator email.",
       );
-    const token = randomBytes(32).toString("hex");
     const result = idem(`${me(res).id}:invite:${p.id}`, key(req), b, () => {
-      const old = one(
-        "SELECT * FROM members WHERE project_id=? AND email=?",
-        p.id,
-        b.email,
-      );
-      if (old && now() - (old.invited_at || 0) < 60000)
-        throw new AppError(
-          "RATE_LIMITED",
-          429,
-          "Wait one minute before resending this invitation.",
-        );
-      if (
-        !old &&
-        (one(
-          "SELECT COUNT(*) AS n FROM members WHERE project_id=? AND status='active'",
+      const invitations = emails.map((email) => {
+        const token = randomBytes(32).toString("hex");
+        const old = one(
+          "SELECT * FROM members WHERE project_id=? AND email=?",
           p.id,
-        )?.n || 0) >= 50
-      )
-        throw new AppError(
-          "QUOTA_EXCEEDED",
-          409,
-          "This project has reached 50 active clients.",
+          email,
         );
-      const mid = old?.id || id();
-      const version = loadRelease(p.current_release_id).version;
-      if (old && old.role !== b.role) invalidateMember(p, mid);
-      run(
-        `INSERT INTO members VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,email) DO UPDATE SET role=excluded.role,download=excluded.download,status='active',invite_digest=excluded.invite_digest,invite_expires=excluded.invite_expires,invited_at=excluded.invited_at,min_version=CASE WHEN members.status='removed' THEN excluded.min_version ELSE members.min_version END`,
-        mid,
-        p.id,
-        b.email,
-        b.role,
-        version,
-        Number(b.download),
-        "active",
-        hash(token),
-        now() + 7 * DAY,
-        now(),
-      );
-      const url = `${origin}/h/${p.public_id}/access?invite=${token}`;
-      notify(
-        p.id,
-        `invite:${mid}:${now()}`,
-        b.email,
-        "You have a client handoff invitation",
-        `You have been invited to review version v${version}. Verify your invited email at ${url}. This invitation expires in 7 days.`,
-      );
-      audit(me(res).id, p.id, "client_invited", {
-        memberId: mid,
-        role: b.role,
+        if (old && now() - (old.invited_at || 0) < 60000)
+          throw new AppError(
+            "RATE_LIMITED",
+            429,
+            "Wait one minute before resending this invitation.",
+          );
+        if (
+          (!old || old.status !== "active") &&
+          (one(
+            "SELECT COUNT(*) AS n FROM members WHERE project_id=? AND status='active'",
+            p.id,
+          )?.n || 0) >= 50
+        )
+          throw new AppError(
+            "QUOTA_EXCEEDED",
+            409,
+            "This project has reached 50 active clients.",
+          );
+        const mid = old?.id || id();
+        const version = loadRelease(p.current_release_id).version;
+        if (old && old.role !== b.role) invalidateMember(p, mid);
+        run(
+          `INSERT INTO members VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,email) DO UPDATE SET role=excluded.role,download=excluded.download,status='active',invite_digest=excluded.invite_digest,invite_expires=excluded.invite_expires,invited_at=excluded.invited_at,min_version=CASE WHEN members.status='removed' THEN excluded.min_version ELSE members.min_version END`,
+          mid,
+          p.id,
+          email,
+          b.role,
+          version,
+          Number(b.download),
+          "active",
+          hash(token),
+          now() + 7 * DAY,
+          now(),
+        );
+        const url = `${origin}/h/${p.public_id}/access?invite=${token}`;
+        notify(
+          p.id,
+          `invite:${mid}:${now()}`,
+          email,
+          "You have a client handoff invitation",
+          `You have been invited to review version v${version}. Verify your invited email at ${url}. This invitation expires in 7 days.`,
+        );
+        audit(me(res).id, p.id, "client_invited", {
+          memberId: mid,
+          role: b.role,
+        });
+        return {
+          id: mid,
+          email,
+          ...(process.env.NODE_ENV !== "production"
+            ? { localInviteUrl: url }
+            : {}),
+        };
       });
-      return {
-        id: mid,
-        ...(process.env.NODE_ENV !== "production"
-          ? { localInviteUrl: url }
-          : {}),
-      };
+      return b.emails ? { invitations } : invitations[0];
     });
     res.json(result);
   });
@@ -914,7 +953,12 @@ export function installRoutes(app: Express) {
         p.id,
         m.min_version,
       ),
-      member: { id: m.id, role: m.role, download: !!m.download },
+      member: {
+        id: m.id,
+        role: m.role,
+        download: !!m.download,
+        email: me(res).email,
+      },
       requests: requests.map((q) => ({
         ...q,
         requiredCount: q.required.length,
@@ -928,7 +972,7 @@ export function installRoutes(app: Express) {
   });
   app.post("/api/releases/:id/read", authenticated, (req, res) => {
     const r = loadRelease(param(req));
-    const { m } = accessRelease(me(res), r);
+    const { p, m } = accessRelease(me(res), r);
     if (m)
       run(
         "INSERT OR IGNORE INTO reads VALUES (?,?,?)",
@@ -1002,20 +1046,35 @@ export function installRoutes(app: Express) {
       one("SELECT * FROM questions WHERE id=?", param(req)),
     );
     const r = loadRelease(q.release_id);
-    const { m } = accessRelease(me(res), r);
+    const { p, m } = accessRelease(me(res), r);
     if (m && (m.role === "Viewer" || q.author_id !== me(res).id))
       throw new AppError("ACCESS_UNAVAILABLE", 404, "Reply is unavailable.");
     const b = z
       .object({ body: z.string().trim().min(1).max(2000) })
       .parse(req.body);
+    const replyId = id();
     run(
       "INSERT INTO replies VALUES (?,?,?,?,?)",
-      id(),
+      replyId,
       q.id,
       me(res).id,
       b.body,
       now(),
     );
+    const author = one("SELECT email FROM users WHERE id=?", q.author_id);
+    const creator = one(
+      "SELECT email FROM users WHERE workspace_id=?",
+      p.workspace_id,
+    );
+    const recipient = m ? creator : author;
+    if (recipient && recipient.email !== me(res).email)
+      notify(
+        p.id,
+        `reply:${replyId}`,
+        recipient.email,
+        `Reply on version v${r.version}`,
+        `Review the reply at ${origin}/h/${p.public_id}?release=${r.id}.`,
+      );
     res.json({ ok: true });
   });
   app.patch("/api/questions/:id", authenticated, (req, res) => {
@@ -1239,6 +1298,25 @@ export function installRoutes(app: Express) {
           hash: r.hash,
           memberId: m.id,
         });
+        const creator = one(
+          "SELECT email FROM users WHERE workspace_id=?",
+          p.workspace_id,
+        );
+        const receipt = requireValue(
+          one(
+            "SELECT id FROM confirmations WHERE request_id=? AND member_id=?",
+            q.id,
+            m.id,
+          ),
+        );
+        if (creator)
+          notify(
+            p.id,
+            `receipt:${receipt.id}`,
+            creator.email,
+            `Receipt recorded for version v${r.version}`,
+            `Review the version receipt at ${origin}/app/projects/${p.id}/handoff.`,
+          );
         return { ok: true };
       });
       res.json(result);
@@ -1318,24 +1396,24 @@ export function installRoutes(app: Express) {
     });
   });
   app.get("/api/settings", authenticated, (req, res) =>
-    res.json(JSON.parse(me(res).settings)),
+    res.json(workspaceSettings(me(res).settings)),
   );
   app.patch("/api/settings", authenticated, (req, res) => {
-    const b = z
-      .object({
-        name: z.string().trim().min(1).max(120),
-        timezone: z.string().refine((v) => {
-          try {
-            new Intl.DateTimeFormat("en", { timeZone: v });
-            return true;
-          } catch {
-            return false;
-          }
-        }),
-        supportEmail: z.union([emailSchema, z.literal("")]),
-        expiryReminders: z.boolean(),
-      })
-      .parse(req.body);
+    const b = settingsSchema.parse({
+      ...workspaceSettings(me(res).settings),
+      ...req.body,
+    });
+    if (b.logoId)
+      requireValue(
+        one(
+          "SELECT a.id FROM assets a JOIN projects p ON p.id=a.project_id WHERE a.id=? AND p.workspace_id=? AND p.lifecycle!='deleted' AND a.status='ready'",
+          b.logoId,
+          me(res).workspace_id,
+        ),
+        "ASSET_UNAVAILABLE",
+        400,
+        "Choose a reviewed image from your workspace.",
+      );
     run(
       "UPDATE users SET settings=? WHERE id=?",
       JSON.stringify(b),

@@ -1,0 +1,11 @@
+{
+  "sample": true,
+  "project": "Northstar website handoff",
+  "version": 2,
+  "guides": 3,
+  "steps": 12,
+  "required_checklist_items": 4,
+  "external_dependencies": false,
+  "client_receipts_included": false,
+  "generated_from_prototype_edits": false
+}

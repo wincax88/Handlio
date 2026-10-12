@@ -65,6 +65,8 @@ Resend 接受请求记为 `accepted`。配置 `RESEND_WEBHOOK_SECRET` 并在 Res
 
 不配置支付适配器时，仅非生产环境开放 `/billing/local-confirm` 与 `/billing/local-refund`。这两条开发接口还要求会话、CSRF 和项目所有权；生产返回不可用。界面明确声明无真实收费。
 
+原订单核验使用 `GET /orders/:orderId`，返回上面的权威交易对象，或 `{"orderId":"internal-order-uuid","status":"pending"}`。必须匹配原订单、金额、币种、交易及环境；未决结果不改变已有账本或开通权益。可选 `tax`（最小货币单位）、`receiptUrl`（HTTPS）、`invoiceNumber` 用于订单详情；不可用时如实留空。核验每个订单间隔至少一分钟；异常不会自动开启第二笔付款。结账回跳地址为 `/app/payment/:orderId`。
+
 ## AI 适配器
 
 配置 `AI_ADAPTER_URL`, `AI_ADAPTER_TOKEN`, `AI_PRIVACY_NOTICE`。没有供应商及告知文本时，AI 不可调用；手工编辑、发布和交付继续可用。这里没有绑定或调用某个特定 OpenAI 模型。

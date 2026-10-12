@@ -45,7 +45,7 @@ npm start
 ```
 
 - `npm test`：真实 SQLite / HTTP 集成测试，覆盖租户隔离、CSRF、保存冲突、图片校验、支付幂等、版本确认、安全撤回、导出与到期。
-- `npm run test:ui`：完整交接流程和本地遮盖像素测试，包含 360px 手机阅读。测试使用独立虚构邮箱；会在开发数据库中创建相应项目。
+- `npm run test:ui`：完整交接、截图遮盖和原型补齐回归，包含 360px 手机阅读和完整回执。使用独立虚构邮箱、5183 / 3011 测试端口、`.work/e2e-data` 数据库和本地供应商模拟。
 - PDF 和浏览器测试优先使用 `CHROMIUM_EXECUTABLE_PATH`，Windows 中也可自动找到 Edge / Chrome。其他环境执行 `npx playwright install chromium`。
 - 测试截图、PDF 样例和追踪信息只放在忽略目录 `.work/` 与 `test-results/`。
 - `npm start` 服务生产构建产物和 API。生产模式还需配置 HTTPS Origin、随机会话密钥和 Resend / SMTP；详见 [部署与恢复](docs/deployment.md)。

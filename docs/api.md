@@ -92,3 +92,14 @@
 不返回 SQL、堆栈、供应商密钥或其他客户字段。字段错误返回 `INVALID_INPUT` 和字段列表。跨租户对象统一返回 404 `ACCESS_UNAVAILABLE`；无会话为 401 `AUTH_REQUIRED`；错误码还包括 `QUOTA_EXCEEDED`, `VALIDATION_FAILED`, `VERSION_CHANGED`, `ASSET_REVOKED`, `ENTITLEMENT_EXPIRED`, `RATE_LIMITED`, `PROVIDER_UNAVAILABLE`。
 
 幂等键为 `Idempotency-Key` 请求头，限定用户、动作和对象。重复同键同内容复用结果，同键不同内容返回 409。业务唯一约束同时保护交易、成员、发布号及确认人数，不仅依赖 HTTP 请求键。
+
+## 原型补齐接口
+
+- `PATCH /api/settings` 支持 `displayName`、`logoId`、`onboardingComplete` 及问题 / 回执 / 到期 / 营销偏好；旧账户保持原使用流程。Logo 必须来自本人工作区的已处理有效素材。
+- `GET /api/workspace/assets` 返回本人工作区可选品牌素材，不公开原图或客户项目。
+- `GET /api/account/sessions` 返回设备信息和当前会话标记，不返回 Cookie、会话散列或 CSRF。`DELETE /api/account/sessions/:id` 要求本人会话和近期验证。
+- `GET /api/support-grants`、`POST /api/support-grants`、`DELETE /api/support-grants/:id` 管理本人限时授权。创建要求近期验证；`scope` 为 `metadata` / `sample`，`hours` 为 1 / 24。`sample` 最多 2,000 字，仅保存用户显式提供的脱敏文字。
+- `POST /api/projects/:id/invites` 保留单个 `email` 契约，或接收 `emails` 数组（1–10 个，不能与 `email` 同时提交）。先验证全部邮箱，在同一事务中去重、检查容量并邀请；任一失败回滚整批；返回 `{invitations:[{id,email,localInviteUrl?}]}`。同一请求键返回原结果。
+- `GET /api/billing/orders/:id` 返回本人订单、项目期限和供应商票据可用字段。`POST /api/billing/orders/:id/check` 查询权威适配器，每分钟最多一次，不根据浏览器回跳开通权益。
+- `GET /api/projects/:id/jobs` 提供导出版本、格式、纸张和下载截止时间。`POST /api/jobs/:id/retry` 仅重试本人项目的失败导出 / AI 任务，要求原因并重新验证权限、修订和额度；不能重试已成功或安全撤回的内容。
+- 运营白名单加近期验证：`GET /api/ops/jobs/:id`、`POST /api/ops/jobs/:id/retry`、`POST /api/ops/orders/:id/check`。修改须填审计原因。`GET /api/ops/grants/:id` 仅能读取尚未到期且未撤销的授权样例，不返回客户手册。

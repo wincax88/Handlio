@@ -18,6 +18,11 @@ test("uploads only reviewed, irreversibly redacted pixels", async ({
     .getByLabel("Verification code")
     .fill((await page.locator(".notice strong").textContent())!);
   await page.getByRole("button", { name: "Verify email", exact: true }).click();
+  await page.getByLabel("Your display name").fill("Alex Morgan");
+  await page
+    .getByLabel("Support email", { exact: true })
+    .fill("help@example.test");
+  await page.getByRole("button", { name: "Create my workspace" }).click();
   await page.getByRole("link", { name: "Create your first project" }).click();
   await page
     .getByLabel("Project name", { exact: true })

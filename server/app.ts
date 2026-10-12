@@ -13,6 +13,7 @@ import { installBilling } from "./billing.js";
 import { installJobs } from "./jobs.js";
 import { installOps } from "./ops.js";
 import { installMailWebhook } from "./mail-webhook.js";
+import { installWorkspace } from "./workspace.js";
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
@@ -45,7 +46,10 @@ export function createApp() {
     "/api/webhooks/billing",
     express.raw({ type: "application/json", limit: "1mb" }),
   );
-  app.use("/api/webhooks/resend", express.raw({ type: "application/json", limit: "256kb" }));
+  app.use(
+    "/api/webhooks/resend",
+    express.raw({ type: "application/json", limit: "256kb" }),
+  );
   app.use(express.json({ limit: "2mb" }));
   app.use(cookieParser());
   // Probes must stay available even when an API client hits its rate limit.
@@ -56,13 +60,19 @@ export function createApp() {
     "/api",
     rateLimit({
       windowMs: 60000,
-      limit: 300,
+      // Browser regression shares a loopback IP across independent accounts.
+      limit: process.env.NODE_ENV === "test" ? 1000 : 300,
       standardHeaders: "draft-7",
       legacyHeaders: false,
+      message: {
+        code: "RATE_LIMITED",
+        safe_message: "Too many requests. Wait one minute and try again.",
+      },
     }),
   );
   installAuth(app);
   installRoutes(app);
+  installWorkspace(app);
   installBilling(app);
   installMailWebhook(app);
   installJobs(app);
