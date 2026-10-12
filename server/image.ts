@@ -28,7 +28,18 @@ export function imageSlot(req: Request, res: Response, next: NextFunction) {
 }
 export function sanitizeImage(
   bytes: Buffer,
-): Promise<{ safe: Buffer; width: number; height: number }> {
+  overlay?: string,
+): Promise<{
+  safe: Buffer;
+  width: number;
+  height: number;
+  quality: {
+    smallText: boolean;
+    glyphCandidates: number;
+    tinyCandidates: number;
+    method: string;
+  };
+}> {
   return new Promise((resolve, reject) => {
     const child = fork(
       fileURLToPath(new URL("./image-worker.mjs", import.meta.url)),
@@ -67,6 +78,7 @@ export function sanitizeImage(
           safe: message.data,
           width: message.width,
           height: message.height,
+          quality: message.quality,
         });
       else
         reject(
@@ -103,6 +115,6 @@ export function sanitizeImage(
         );
       }
     });
-    child.send({ bytes });
+    child.send({ bytes, overlay });
   });
 }

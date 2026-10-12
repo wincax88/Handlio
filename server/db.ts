@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS session_devices (session_digest TEXT PRIMARY KEY REFE
 CREATE TABLE IF NOT EXISTS support_grants (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), scope TEXT NOT NULL, sample TEXT NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS order_checks (order_id TEXT PRIMARY KEY REFERENCES orders(id), checked_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS order_receipts (order_id TEXT PRIMARY KEY REFERENCES orders(id), tax INTEGER, receipt_url TEXT, invoice_number TEXT);
+CREATE TABLE IF NOT EXISTS asset_layers (asset_id TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE, base_asset_id TEXT NOT NULL REFERENCES assets(id), shapes TEXT NOT NULL, renderer TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), release_id TEXT NOT NULL, actor_id TEXT NOT NULL, reason TEXT NOT NULL, affected TEXT NOT NULL, status TEXT NOT NULL, resolution TEXT, created_at INTEGER NOT NULL, closed_at INTEGER);
+CREATE TABLE IF NOT EXISTS ai_costs (job_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, workspace_id TEXT NOT NULL, reserved_micros INTEGER NOT NULL, cost_micros INTEGER, status TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS worker_state (name TEXT PRIMARY KEY, last_success_at INTEGER, last_error_at INTEGER, error_code TEXT);
+CREATE TABLE IF NOT EXISTS ai_controls (project_id TEXT PRIMARY KEY REFERENCES projects(id), budget_micros INTEGER NOT NULL, paused INTEGER NOT NULL, reason TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS asset_quality (asset_id TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE, result TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS link_checks (project_id TEXT NOT NULL, revision INTEGER NOT NULL, url TEXT NOT NULL, status TEXT NOT NULL, checked_at INTEGER NOT NULL, PRIMARY KEY(project_id,revision,url));
 `);
 // SQL is always parameterized. JSON snapshots remain immutable after publication.
 export type Row = Record<string, any>;

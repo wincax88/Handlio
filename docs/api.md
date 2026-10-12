@@ -103,3 +103,13 @@
 - `GET /api/billing/orders/:id` 返回本人订单、项目期限和供应商票据可用字段。`POST /api/billing/orders/:id/check` 查询权威适配器，每分钟最多一次，不根据浏览器回跳开通权益。
 - `GET /api/projects/:id/jobs` 提供导出版本、格式、纸张和下载截止时间。`POST /api/jobs/:id/retry` 仅重试本人项目的失败导出 / AI 任务，要求原因并重新验证权限、修订和额度；不能重试已成功或安全撤回的内容。
 - 运营白名单加近期验证：`GET /api/ops/jobs/:id`、`POST /api/ops/jobs/:id/retry`、`POST /api/ops/orders/:id/check`。修改须填审计原因。`GET /api/ops/grants/:id` 仅能读取尚未到期且未撤销的授权样例，不返回客户手册。
+
+## 非支付增强接口
+
+- 项目对象增加 `reading`（当前版本有效阅读人数／有效客户数），阅读不作为确认；筛选组合在工作台进行。
+- `POST /projects/:id/copy` 接收可选 `assetIds`，仅允许原草稿引用的 ready 图片；独立复制、容量检查与项目创建处于同一事务，失败清理本次文件。
+- `GET /projects/:id/assets/:assetId/edit` 返回已安全处理底图 ID 和标注配方，仅 Owner 可读。`POST /projects/:id/assets/:baseId/annotations` 接收最多 100 个框／箭头／编号／标签，返回新资产 ID；验证租户、基图状态、容量与幂等键。安全遮盖不保存在可编辑层中。
+- `POST /projects/:id/check-links` 对已保存修订最多 20 个链接进行无凭据 HTTPS HEAD 检查；只固定连接到经过检查的公网 IPv4 地址，每项目间隔一分钟。受限或不确定链接不被猜测为可用。
+- `GET /projects/:id/incidents` 返回事故与通知元数据。`PATCH /projects/:id/incidents/:incidentId` 需要近期验证、解决说明和复核勾选；关闭事故不会恢复共享或撤回资产。
+- `GET /projects/:id/resources` 返回本人项目 AI 费用、预留、未知费用、预算、任务元数据。`PATCH /projects/:id/ai-budget` 需要近期验证、0.1–1000 USD 预算、原因和明确复核；服务级每日上限仍有效。
+- `GET /service-information` 公布运营主体、实际配置的托管地区及应用清理时间，不返回密钥。缺少托管地区时显示待确认。

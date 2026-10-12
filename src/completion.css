@@ -37,6 +37,45 @@
   height: 100%;
   object-fit: contain;
 }
+.advanced-filters {
+  padding: 20px;
+  border-bottom: 1px solid #e1e8e4;
+}
+.advanced-filters summary {
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.reading-summary,
+.overview-grid > .notice {
+  grid-column: 1/-1;
+}
+.annotation-layer {
+  padding: 16px 0;
+  border-top: 1px solid #e1e8e4;
+}
+.layer-geometry {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.copy-images {
+  border: 1px solid #e1e8e4;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.incident-record {
+  padding: 16px 0;
+  border-top: 1px solid #e1e8e4;
+}
+@media (max-width: 700px) {
+  .layer-geometry {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .project-list-controls {
+    flex-wrap: wrap;
+  }
+}
 .draft-preview {
   container-type: inline-size;
 }

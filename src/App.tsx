@@ -999,6 +999,10 @@ function Projects({ session }: { session: Session }) {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  const [lifecycleFilter, setLifecycleFilter] = useState("all");
+  const [planFilter, setPlanFilter] = useState("all");
+  const [receiptFilter, setReceiptFilter] = useState("all");
+  const [storageFilter, setStorageFilter] = useState(false);
   const [sort, setSort] = useState("updated");
   const tz = session.user!.settings.timezone;
   const soon = (p: Project) =>
@@ -1024,7 +1028,22 @@ function Projects({ session }: { session: Session }) {
           (filter === "draft" && !p.currentRelease) ||
           (filter === "published" && !!p.currentRelease) ||
           (filter === "pending" && pending(p)) ||
-          (filter === "soon" && soon(p))),
+          (filter === "soon" && soon(p))) &&
+        (lifecycleFilter === "all" || p.lifecycle === lifecycleFilter) &&
+        (planFilter === "all" ||
+          (planFilter === "free"
+            ? p.entitlement.state === "free"
+            : planFilter === "paid"
+              ? p.entitlement.state === "paid_active"
+              : p.entitlement.state === "expired_grace")) &&
+        (receiptFilter === "all" ||
+          (receiptFilter === "none"
+            ? !p.confirmation
+            : receiptFilter === "confirmed"
+              ? p.confirmation?.status === "confirmed"
+              : pending(p))) &&
+        (!storageFilter ||
+          p.entitlement.storage >= p.entitlement.limits.storage * 0.8),
     )
     .sort((a, b) =>
       sort === "name"
@@ -1105,6 +1124,63 @@ function Projects({ session }: { session: Session }) {
             </div>
           )}
           <div className="projects-card">
+            <details className="advanced-filters">
+              <summary>More filters</summary>
+              <div className="form-grid">
+                <Field label="Project lifecycle">
+                  <select
+                    value={lifecycleFilter}
+                    onChange={(e) => setLifecycleFilter(e.target.value)}
+                  >
+                    <option value="all">All lifecycles</option>
+                    <option value="active">Active</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </Field>
+                <Field label="Project plan">
+                  <select
+                    value={planFilter}
+                    onChange={(e) => setPlanFilter(e.target.value)}
+                  >
+                    <option value="all">All plans</option>
+                    <option value="free">Free draft</option>
+                    <option value="paid">Active project pack</option>
+                    <option value="grace">Owner export window</option>
+                  </select>
+                </Field>
+                <Field label="Receipt status">
+                  <select
+                    value={receiptFilter}
+                    onChange={(e) => setReceiptFilter(e.target.value)}
+                  >
+                    <option value="all">All receipt states</option>
+                    <option value="none">Not requested</option>
+                    <option value="pending">Awaiting receipt</option>
+                    <option value="confirmed">Confirmed</option>
+                  </select>
+                </Field>
+              </div>
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={storageFilter}
+                  onChange={(e) => setStorageFilter(e.target.checked)}
+                />
+                Storage at 80% or above
+              </label>
+              <Button
+                kind="text"
+                onClick={() => {
+                  setLifecycleFilter("all");
+                  setPlanFilter("all");
+                  setReceiptFilter("all");
+                  setStorageFilter(false);
+                  setFilter("all");
+                }}
+              >
+                Reset filters
+              </Button>
+            </details>
             <div className="list-toolbar">
               <div className="search-input">
                 <Search size={16} />

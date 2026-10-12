@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { ProjectEditorProps } from "./ProjectPage";
 import { api, assetUrl, send } from "./api";
+import { registerNavigationGuard } from "./api";
 import {
   Badge,
   Button,
@@ -48,6 +49,7 @@ type LocalImage = {
   status: string;
   error?: string;
   assetId?: string;
+  sourceAssetId?: string;
 };
 export function Assets({
   project: p,
@@ -91,7 +93,10 @@ export function Assets({
       if (step?.assetId)
         void (async () => {
           try {
-            const response = await fetch(assetUrl(step.assetId!));
+            const recipe = await api(
+              `/projects/${p.id}/assets/${step.assetId}/edit`,
+            );
+            const response = await fetch(assetUrl(recipe.baseId));
             if (!response.ok) throw new Error("Screenshot unavailable.");
             const blob = await response.blob();
             const bitmap = await createImageBitmap(blob);
@@ -104,7 +109,8 @@ export function Assets({
               name: "Processed screenshot.png",
               bitmap,
               size: blob.size,
-              marks: [],
+              marks: recipe.shapes as Mark[],
+              sourceAssetId: recipe.baseId as string,
               reviewed: false,
               status: "local",
             };
@@ -122,9 +128,17 @@ export function Assets({
       }
     };
     window.addEventListener("beforeunload", warn);
+    const unregister = registerNavigationGuard(
+      () =>
+        !queueRef.current.some((q) => q.status !== "uploaded") ||
+        window.confirm(
+          "Leave screenshot preparation? Images that are not uploaded will be lost. Stay here to finish reviewing and uploading them.",
+        ),
+    );
     return () => {
       cancelled = true;
       window.removeEventListener("beforeunload", warn);
+      unregister();
       queueRef.current.forEach((q) => q.bitmap.close());
     };
   }, [p.id, replace]);
@@ -231,7 +245,7 @@ export function Assets({
     };
   }
   function down(e: PointerEvent<HTMLCanvasElement>) {
-    if (!image || image.status === "uploaded") return;
+    if (!image || image.status === "uploaded" || busy) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     start.current = position(e);
     setPending({ type: tool, ...start.current, w: 0, h: 0, label });
@@ -268,7 +282,10 @@ export function Assets({
       const base = document.createElement("canvas");
       base.width = image.bitmap.width;
       base.height = image.bitmap.height;
-      draw(base, image);
+      draw(base, {
+        ...image,
+        marks: image.marks.filter((m) => m.type === "redact"),
+      });
       const result = document.createElement("canvas");
       result.width = w;
       result.height = h;
@@ -280,7 +297,17 @@ export function Assets({
       edit((q) => {
         q.bitmap.close();
         q.bitmap = bitmap;
-        q.marks = [];
+        q.marks = q.marks
+          .filter((m) => m.type !== "redact")
+          .map((m) => ({ ...m, x: m.x - x, y: m.y - y }))
+          .filter(
+            (m) =>
+              m.x + Math.abs(m.w) >= 0 &&
+              m.y + Math.abs(m.h) >= 0 &&
+              m.x <= w &&
+              m.y <= h,
+          );
+        q.sourceAssetId = undefined;
         q.reviewed = false;
       });
     } else if (
@@ -288,7 +315,9 @@ export function Assets({
       (Math.abs(mark.w) > 3 && Math.abs(mark.h) > 3)
     )
       edit((q) => {
+        if (q.marks.length >= 100) return;
         q.marks.push(mark);
+        if (mark.type === "redact") q.sourceAssetId = undefined;
         q.reviewed = false;
       });
   }
@@ -311,7 +340,10 @@ export function Assets({
           const flat = document.createElement("canvas");
           flat.width = item.bitmap.width;
           flat.height = item.bitmap.height;
-          draw(flat, item);
+          draw(flat, {
+            ...item,
+            marks: item.marks.filter((m) => m.type === "redact"),
+          });
           const blob = await new Promise<Blob>((resolve, reject) =>
             flat.toBlob(
               (b) =>
@@ -323,15 +355,28 @@ export function Assets({
             throw new Error(
               "Processed image exceeds 20 MiB. Crop or resize the source and retry.",
             );
-          const uploaded = await api(`/projects/${p.id}/assets`, {
-            method: "POST",
-            body: blob,
-            headers: {
-              "Content-Type": "image/png",
-              "X-Sanitized": "true",
-              "Idempotency-Key": item.id,
-            },
-          });
+          const base = item.sourceAssetId
+            ? { id: item.sourceAssetId }
+            : await api(`/projects/${p.id}/assets`, {
+                method: "POST",
+                body: blob,
+                headers: {
+                  "Content-Type": "image/png",
+                  "X-Sanitized": "true",
+                  "Idempotency-Key": item.id,
+                },
+              });
+          const shapes = item.marks.filter(
+            (m) => m.type !== "redact" && m.type !== "crop",
+          );
+          const uploaded = shapes.length
+            ? await send(
+                `/projects/${p.id}/assets/${base.id}/annotations`,
+                { shapes },
+                "POST",
+                `${item.id}:layers`,
+              )
+            : base;
           update((d) => {
             if (replace) {
               const step = d.guides
@@ -362,7 +407,7 @@ export function Assets({
                 ? {
                     ...q,
                     bitmap: flattened,
-                    marks: [],
+                    marks: shapes,
                     size: blob.size,
                     status: "uploaded",
                     assetId: uploaded.id,
@@ -568,6 +613,121 @@ export function Assets({
                 onPointerUp={up}
               />
             </div>
+            {image && image.marks.some((m) => m.type !== "redact") && (
+              <details className="annotation-layers" open>
+                <summary>Editable annotation layers</summary>
+                {image.marks.map((mark, index) =>
+                  mark.type === "redact" ? null : (
+                    <div className="annotation-layer" key={index}>
+                      <strong>
+                        {mark.type} {index + 1}
+                      </strong>
+                      <div className="layer-geometry">
+                        {(
+                          [
+                            ["x", "X"],
+                            ["y", "Y"],
+                            ["w", "Width"],
+                            ["h", "Height"],
+                          ] as const
+                        ).map(([key, label]) => (
+                          <Field
+                            key={key}
+                            label={`Layer ${index + 1} ${label}`}
+                          >
+                            <input
+                              type="number"
+                              min={-8000}
+                              max={8000}
+                              value={mark[key]}
+                              disabled={busy || image.status === "uploaded"}
+                              onChange={(e) => {
+                                const value = Number(e.target.value);
+                                if (Number.isFinite(value))
+                                  edit((q) => {
+                                    q.marks[index] = {
+                                      ...mark,
+                                      [key]: Math.max(
+                                        -8000,
+                                        Math.min(8000, value),
+                                      ),
+                                    };
+                                    q.reviewed = false;
+                                  });
+                              }}
+                            />
+                          </Field>
+                        ))}
+                      </div>
+                      {["label", "number"].includes(mark.type) && (
+                        <Field label={`Layer ${index + 1} text`}>
+                          <input
+                            maxLength={80}
+                            value={mark.label}
+                            disabled={busy || image.status === "uploaded"}
+                            onChange={(e) =>
+                              edit((q) => {
+                                q.marks[index] = {
+                                  ...mark,
+                                  label: e.target.value,
+                                };
+                                q.reviewed = false;
+                              })
+                            }
+                          />
+                        </Field>
+                      )}
+                      <Button
+                        kind="text"
+                        disabled={busy || image.status === "uploaded"}
+                        onClick={() =>
+                          edit((q) => {
+                            q.marks[index] = {
+                              ...mark,
+                              x: Math.max(-8000, mark.x - 5),
+                            };
+                            q.reviewed = false;
+                          })
+                        }
+                      >
+                        Move layer left
+                      </Button>
+                      <Button
+                        kind="text"
+                        disabled={busy || image.status === "uploaded"}
+                        onClick={() =>
+                          edit((q) => {
+                            q.marks[index] = {
+                              ...mark,
+                              x: Math.min(image.bitmap.width, mark.x + 5),
+                            };
+                            q.reviewed = false;
+                          })
+                        }
+                      >
+                        Move layer right
+                      </Button>
+                      <Button
+                        kind="text danger-text"
+                        disabled={busy || image.status === "uploaded"}
+                        onClick={() =>
+                          edit((q) => {
+                            q.marks.splice(index, 1);
+                            q.reviewed = false;
+                          })
+                        }
+                      >
+                        Remove layer
+                      </Button>
+                    </div>
+                  ),
+                )}
+                <p className="muted">
+                  Redactions are part of the safe base image and cannot be
+                  restored after upload.
+                </p>
+              </details>
+            )}
             <label className="review-check">
               <input
                 type="checkbox"
@@ -682,15 +842,30 @@ export function Assets({
                       kind="text"
                       onClick={async () => {
                         try {
-                          const response = await fetch(assetUrl(a.id));
+                          if (queue.length >= 20)
+                            throw new Error(
+                              "Select at most 20 screenshots in one batch.",
+                            );
+                          const recipe = await api(
+                            `/projects/${p.id}/assets/${a.id}/edit`,
+                          );
+                          const response = await fetch(assetUrl(recipe.baseId));
                           if (!response.ok)
                             throw new Error("Screenshot unavailable.");
                           const blob = await response.blob();
-                          await choose([
-                            new File([blob], "Processed screenshot.png", {
-                              type: "image/png",
-                            }),
-                          ]);
+                          const bitmap = await createImageBitmap(blob);
+                          const next: LocalImage = {
+                            id: crypto.randomUUID(),
+                            name: "Processed screenshot.png",
+                            bitmap,
+                            size: blob.size,
+                            marks: recipe.shapes,
+                            sourceAssetId: recipe.baseId,
+                            reviewed: false,
+                            status: "local",
+                          };
+                          setQueue((prev) => [...prev, next]);
+                          setSelected(next.id);
                         } catch (e) {
                           setError((e as Error).message);
                         }

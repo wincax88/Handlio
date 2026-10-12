@@ -78,6 +78,12 @@ export function installOps(app: Express) {
   app.get("/api/ops", authenticated, operator, (req, res) => {
     audit(res.locals.user.id, null, "ops_diagnostics_read");
     res.json({
+      workers: many(
+        "SELECT name AS id,last_success_at,last_error_at,error_code FROM worker_state",
+      ),
+      alerts: many(
+        "SELECT name AS id,error_code,last_error_at FROM worker_state WHERE error_code IS NOT NULL AND COALESCE(last_error_at,0)>=COALESCE(last_success_at,0) UNION ALL SELECT project_id AS id,reason AS error_code,NULL AS last_error_at FROM ai_controls WHERE paused=1",
+      ),
       jobs: many(
         "SELECT id,project_id,type,state,error,attempts,created_at FROM jobs ORDER BY created_at DESC LIMIT 100",
       ),

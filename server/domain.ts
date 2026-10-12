@@ -223,6 +223,19 @@ export function projectDto(p: Row) {
     currentRelease: r ? releaseDto(r) : null,
     updatedAt: new Date(p.updated_at).toISOString(),
     entitlement: entitlement(p),
+    reading: {
+      readers:
+        one(
+          "SELECT COUNT(DISTINCT rd.member_id) AS n FROM reads rd JOIN members m ON m.id=rd.member_id WHERE m.project_id=? AND m.status='active' AND rd.release_id=?",
+          p.id,
+          p.current_release_id || "",
+        )?.n || 0,
+      clients:
+        one(
+          "SELECT COUNT(*) AS n FROM members WHERE project_id=? AND status='active'",
+          p.id,
+        )?.n || 0,
+    },
     openQuestions:
       one(
         "SELECT COUNT(*) AS n FROM questions WHERE project_id=? AND status='open'",
@@ -298,6 +311,17 @@ export function validate(p: Row, includePayment = true) {
   const d = JSON.parse(p.draft) as Draft;
   const blockers: Issue[] = [];
   const warnings: Issue[] = [];
+  for (const link of many(
+    "SELECT status,url FROM link_checks WHERE project_id=? AND revision=? AND checked_at>?",
+    p.id,
+    p.revision,
+    now() - DAY,
+  ))
+    if (link.status !== "reachable")
+      warnings.push({
+        code: "LINK_REVIEW",
+        message: `Review this external link (${link.status}): ${link.url}`,
+      });
   if (includePayment && entitlement(p).state !== "paid_active")
     blockers.push({
       code: "PAYMENT_REQUIRED",
@@ -383,6 +407,22 @@ export function validate(p: Row, includePayment = true) {
           guideId: g.id,
           stepId: s.id,
         });
+      if (
+        s.assetId &&
+        one("SELECT result FROM asset_quality WHERE asset_id=?", s.assetId)
+      ) {
+        const quality = JSON.parse(
+          one("SELECT result FROM asset_quality WHERE asset_id=?", s.assetId)!
+            .result,
+        );
+        if (quality.smallText)
+          warnings.push({
+            code: "SMALL_SCREENSHOT_TEXT",
+            message: `Possible small text in “${s.title}”. Check it at client reading size; crop or split the screenshot if needed.`,
+            guideId: g.id,
+            stepId: s.id,
+          });
+      }
     }
   }
   if (!d.maintenance.trim())

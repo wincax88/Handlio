@@ -41,6 +41,8 @@ import {
 import { Manual } from "./Reader";
 import { Metric } from "./Prototype";
 import { VersionComparison } from "./Comparison";
+import { Terminology } from "./Terminology";
+import { Incidents } from "./Incidents";
 export async function waitJob(jid: string) {
   for (let i = 0; i < 185; i++) {
     await new Promise((r) => setTimeout(r, 1000));
@@ -68,6 +70,7 @@ export function Handbook({
   const [busy, setBusy] = useState(false);
   const [logoAssets, setLogoAssets] = useState<any[]>([]);
   const [previewMode, setPreviewMode] = useState("desktop");
+  const [linkResults, setLinkResults] = useState<any>(null);
   useEffect(() => {
     void api(`/projects/${p.id}/assets`)
       .then(setLogoAssets)
@@ -100,10 +103,46 @@ export function Handbook({
               <ListChecks size={16} />
               {busy ? "Checking…" : "Run publishing check"}
             </Button>
+            <Button
+              kind="secondary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError(null);
+                try {
+                  await flush();
+                  setLinkResults(
+                    await send(`/projects/${p.id}/check-links`, {}),
+                  );
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Check external links
+            </Button>
           </>
         }
       />
       <ErrorNotice error={error} />
+      {linkResults && (
+        <Panel title="External link results">
+          <p>{linkResults.note}</p>
+          {!linkResults.results.length && (
+            <p>No external links in this saved draft.</p>
+          )}
+          {linkResults.results.map((r: any) => (
+            <p key={r.url}>
+              {r.url} ·{" "}
+              <Badge tone={r.status === "reachable" ? "green" : "amber"}>
+                {r.status}
+              </Badge>
+            </p>
+          ))}
+        </Panel>
+      )}
       {preview ? (
         <div className={`draft-preview preview-${previewMode}`}>
           <div className="action-row preview-controls">
@@ -265,6 +304,7 @@ export function Handbook({
                 comments are excluded from the handbook and exports.
               </p>
             </Panel>
+            <Terminology draft={d} update={update} />
             <div id="handbook-checklist">
               <Panel
                 title="Required handoff checklist"
@@ -747,6 +787,10 @@ export function Releases({
         </div>
       </div>
       <h2 className="section-title">Version history</h2>
+      <Incidents
+        key={releases.map((r) => `${r.id}:${r.status}`).join(":")}
+        projectId={p.id}
+      />
       {releases.length > 0 && (
         <VersionComparison
           key={releases.map((r) => r.id).join(":")}

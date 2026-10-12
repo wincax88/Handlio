@@ -148,9 +148,9 @@ export async function processNotifications() {
         );
         if (
           !m ||
-          !p.sharing ||
-          p.lifecycle !== "active" ||
-          entitlement(p).state !== "paid_active"
+          (!p.sharing && !n.event_key.startsWith("security-incident:")) ||
+          (p.lifecycle !== "active" && !n.event_key.startsWith("security-incident:")) ||
+          (entitlement(p).state !== "paid_active" && !n.event_key.startsWith("security-incident:"))
         ) {
           run("UPDATE notifications SET state='canceled' WHERE id=?", n.id);
           continue;

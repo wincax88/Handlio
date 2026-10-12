@@ -10,11 +10,19 @@ export default defineConfig({
   testDir: "tests",
   testMatch: "**/*.e2e.ts",
   workers: 1,
+  projects: (process.env.HANDLIO_TEST_BROWSERS || "chromium")
+    .split(",")
+    .map((name) => ({
+      name,
+      use: {
+        browserName: name as "chromium" | "firefox" | "webkit",
+        launchOptions: name === "chromium" ? { executablePath } : {},
+      },
+    })),
   timeout: 90000,
   use: {
     baseURL: "http://localhost:5183",
     viewport: { width: 1440, height: 1000 },
-    launchOptions: { executablePath },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -33,7 +41,8 @@ export default defineConfig({
       HANDLIO_API_PROXY: "http://127.0.0.1:3011",
       APP_ORIGIN: "http://localhost:5183",
       NODE_ENV: "test",
-      OPS_EMAILS: "ops-ui@example.test",
+      OPS_EMAILS:
+        "ops-ui@example.test,ops-chromium@example.test,ops-firefox@example.test,ops-webkit@example.test",
     },
     timeout: 60000,
   },

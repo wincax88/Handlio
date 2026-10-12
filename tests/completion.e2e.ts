@@ -186,13 +186,19 @@ test("preview, field comparison, conflict merge, batch invites, client replies a
   await page.goto(`/app/projects/${project.id}/guides`);
   let releasePatch!: () => void;
   const held = new Promise<void>((resolve) => (releasePatch = resolve));
+  let capturedPatch!: () => void;
+  const captured = new Promise<void>((resolve) => (capturedPatch = resolve));
   await page.route(`**/api/projects/${project.id}/draft`, async (route) => {
-    if (route.request().method() === "PATCH") await held;
+    if (route.request().method() === "PATCH") {
+      capturedPatch();
+      await held;
+    }
     await route.continue();
   });
   await page
     .getByLabel("Instruction", { exact: true })
     .fill("My local preview instruction.");
+  await captured;
   const serverProject = await project.get();
   serverProject.draft.guides[0].steps[0].body =
     "Newer server preview instruction.";
@@ -350,9 +356,10 @@ test("preview, field comparison, conflict merge, batch invites, client replies a
 });
 test("operations inspects only metadata or explicit samples and audits provider checks", async ({
   page,
+  browserName,
 }) => {
   test.setTimeout(60000);
-  await signIn(page, "ops-ui@example.test");
+  await signIn(page, `ops-${browserName}@example.test`);
   const project = await readyProject(page);
   const grant = await project.call("/support-grants", {
     scope: "sample",
@@ -363,11 +370,9 @@ test("operations inspects only metadata or explicit samples and audits provider 
   await expect(
     page.getByRole("heading", { name: "Operations diagnostics", exact: true }),
   ).toBeVisible();
-  const orders = page
-    .locator(".panel")
-    .filter({
-      has: page.getByRole("heading", { name: "orders", exact: true }),
-    });
+  const orders = page.locator(".panel").filter({
+    has: page.getByRole("heading", { name: "orders", exact: true }),
+  });
   await orders
     .locator(".request-row")
     .filter({ hasText: project.orderId })
@@ -388,11 +393,9 @@ test("operations inspects only metadata or explicit samples and audits provider 
     }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Close details" }).click();
-  const grants = page
-    .locator(".panel")
-    .filter({
-      has: page.getByRole("heading", { name: "grants", exact: true }),
-    });
+  const grants = page.locator(".panel").filter({
+    has: page.getByRole("heading", { name: "grants", exact: true }),
+  });
   await grants
     .locator(".request-row")
     .filter({ hasText: grant.id })

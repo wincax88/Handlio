@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { Guide, Step } from "../shared/model";
 import type { ProjectEditorProps } from "./ProjectPage";
+import { TermHints } from "./Terminology";
 import { api, assetUrl, navigate, send } from "./api";
 import { Badge, Button, Empty, ErrorNotice, Field, Link } from "./ui";
 export const newStep = (): Step => ({
@@ -689,6 +690,12 @@ export function Editor({
         )}
       </section>
       <aside className="editor-properties">
+        {step && (
+          <TermHints
+            text={`${step.title}\n${step.body}\n${step.expected}\n${step.warning}`}
+            draft={draft}
+          />
+        )}
         <p className="eyebrow">Step details</p>
         {step && !guideSettings ? (
           <>

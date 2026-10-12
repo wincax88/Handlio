@@ -3,7 +3,7 @@ import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { writeFile, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { copyFileSync } from "node:fs";
+import { copyFileSync, unlinkSync } from "node:fs";
 import { imageSlot, sanitizeImage } from "./image.js";
 import {
   AppError,
@@ -43,6 +43,7 @@ import {
 } from "../shared/model.js";
 import { notify, origin } from "./providers.js";
 import { settingsSchema, workspaceSettings } from "../shared/workspace.js";
+import { relatedAssets } from "./annotations.js";
 const param = (r: Request, key = "id") => String(r.params[key]);
 const key = (r: Request) =>
   String(r.get("idempotency-key") || r.body?.idempotencyKey || "");
@@ -316,63 +317,130 @@ export function installRoutes(app: Express) {
         name: z.string().trim().min(1).max(120),
         clientName: z.string().trim().min(1).max(120),
         reviewed: z.literal(true),
+        assetIds: z.array(z.string()).max(21).default([]),
       })
       .parse(req.body);
-    const result = idem(`${me(res).id}:copy:${source.id}`, key(req), b, () => {
-      if (
-        many(
-          "SELECT * FROM projects WHERE workspace_id=? AND lifecycle!='deleted'",
-          source.workspace_id,
-        ).some((p) => entitlement(p).state === "free")
-      )
-        throw new AppError(
-          "QUOTA_EXCEEDED",
-          409,
-          "Activate or delete the current free draft first.",
+    const copiedFiles: string[] = [];
+    let result;
+    try {
+      result = idem(`${me(res).id}:copy:${source.id}`, key(req), b, () => {
+        if (
+          many(
+            "SELECT * FROM projects WHERE workspace_id=? AND lifecycle!='deleted'",
+            source.workspace_id,
+          ).some((p) => entitlement(p).state === "free")
+        )
+          throw new AppError(
+            "QUOTA_EXCEEDED",
+            409,
+            "Activate or delete the current free draft first.",
+          );
+        const d = JSON.parse(source.draft) as Draft;
+        const originalAssets = new Set(
+          [
+            d.logoId,
+            ...d.guides.flatMap((g) => g.steps.map((s) => s.assetId)),
+          ].filter(Boolean),
         );
-      const d = JSON.parse(source.draft) as Draft; // Structure and text only. Explicit image reuse is deliberately excluded.
-      d.supportEmail = "";
-      d.supportUrl = "";
-      d.logoId = null;
-      d.guides.forEach((g) => {
-        g.id = id();
-        g.steps.forEach((s) => {
-          s.id = id();
-          s.assetId = null;
-          s.reviewed = false;
-          s.textOnly = false;
-          s.aiPending = false;
+        const selectedAssets = [...new Set(b.assetIds)].map((aid) => {
+          if (!originalAssets.has(aid))
+            throw new AppError(
+              "ASSET_UNAVAILABLE",
+              400,
+              "Choose only screenshots referenced in this source draft.",
+            );
+          return requireValue(
+            one(
+              "SELECT * FROM assets WHERE id=? AND project_id=? AND status='ready'",
+              aid,
+              source.id,
+            ),
+            "ASSET_UNAVAILABLE",
+            400,
+            "The selected image is unavailable.",
+          );
         });
-      });
-      d.checklist.forEach((c) => {
-        c.id = id();
-        c.done = false;
-        c.guideId = null;
-      });
-      if (
-        d.guides.length > 3 ||
-        d.guides.reduce((n, g) => n + g.steps.length, 0) > 20
-      )
-        throw new AppError(
-          "QUOTA_EXCEEDED",
-          409,
-          "The source structure exceeds free draft limits.",
+        if (selectedAssets.reduce((n, a) => n + a.bytes, 0) > 100 * 1024 * 1024)
+          throw new AppError(
+            "QUOTA_EXCEEDED",
+            409,
+            "Selected images exceed free draft storage.",
+          );
+        const assetMap = new Map(selectedAssets.map((a) => [a.id, id()]));
+        d.supportEmail = "";
+        d.supportUrl = "";
+        d.logoId = d.logoId ? assetMap.get(d.logoId) || null : null;
+        d.guides.forEach((g) => {
+          g.id = id();
+          g.steps.forEach((s) => {
+            s.id = id();
+            s.assetId = s.assetId ? assetMap.get(s.assetId) || null : null;
+            s.reviewed = false;
+            s.textOnly = false;
+            s.aiPending = false;
+          });
+        });
+        d.checklist.forEach((c) => {
+          c.id = id();
+          c.done = false;
+          c.guideId = null;
+        });
+        if (
+          d.guides.length > 3 ||
+          d.guides.reduce((n, g) => n + g.steps.length, 0) > 20
+        )
+          throw new AppError(
+            "QUOTA_EXCEEDED",
+            409,
+            "The source structure exceeds free draft limits.",
+          );
+        const pid = id();
+        run(
+          "INSERT INTO projects (id,workspace_id,public_id,name,client_name,draft,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+          pid,
+          source.workspace_id,
+          randomBytes(24).toString("hex"),
+          b.name,
+          b.clientName,
+          JSON.stringify(d),
+          now(),
+          now(),
         );
-      const pid = id();
-      run(
-        "INSERT INTO projects (id,workspace_id,public_id,name,client_name,draft,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-        pid,
-        source.workspace_id,
-        randomBytes(24).toString("hex"),
-        b.name,
-        b.clientName,
-        JSON.stringify(d),
-        now(),
-        now(),
-      );
-      audit(me(res).id, pid, "project_copied", { sourceId: source.id });
-      return { id: pid };
-    });
+        for (const a of selectedAssets) {
+          const newId = assetMap.get(a.id)!;
+          copyFileSync(
+            path.join(dataDir, `${a.id}.png`),
+            path.join(dataDir, `${newId}.png`),
+          );
+          copiedFiles.push(path.join(dataDir, `${newId}.png`));
+          run(
+            "INSERT INTO assets VALUES (?,?,?,?,?,?,?,?)",
+            newId,
+            pid,
+            a.hash,
+            a.bytes,
+            a.width,
+            a.height,
+            "ready",
+            now(),
+          );
+          run(
+            "INSERT INTO asset_quality SELECT ?,result FROM asset_quality WHERE asset_id=?",
+            newId,
+            a.id,
+          );
+        }
+        audit(me(res).id, pid, "project_copied", { sourceId: source.id });
+        return { id: pid };
+      });
+    } catch (error) {
+      for (const file of copiedFiles) {
+        try {
+          unlinkSync(file);
+        } catch {}
+      }
+      throw error;
+    }
     res.json(result);
   });
   app.get("/api/projects/:id/assets", authenticated, (req, res) => {
@@ -531,6 +599,11 @@ export function installRoutes(app: Express) {
             height: meta.height,
             bytes: safe.length,
           };
+          run(
+            "INSERT OR REPLACE INTO asset_quality VALUES (?,?)",
+            aid,
+            JSON.stringify(processed.quality),
+          );
           run(
             "INSERT INTO idempotency VALUES (?,?,?,?)",
             `${me(res).id}:upload:${p.id}`,
@@ -717,10 +790,13 @@ export function installRoutes(app: Express) {
       const affected = [r.id];
       if (b.security) {
         const d = JSON.parse(r.snapshot) as Draft;
-        const assets = [
-          d.logoId,
-          ...d.guides.flatMap((g) => g.steps.map((s) => s.assetId)),
-        ].filter(Boolean);
+        const assets = relatedAssets(
+          p.id,
+          [
+            d.logoId,
+            ...d.guides.flatMap((g) => g.steps.map((s) => s.assetId)),
+          ].filter(Boolean) as string[],
+        );
         for (const a of assets)
           run(
             "UPDATE assets SET status='revoked' WHERE id=? AND project_id=?",
@@ -759,6 +835,40 @@ export function installRoutes(app: Express) {
       }
       if (affected.includes(p.current_release_id))
         run("UPDATE projects SET sharing=0 WHERE id=?", p.id);
+      if (b.security) {
+        const incidentId = id();
+        run(
+          "INSERT INTO incidents VALUES (?,?,?,?,?,?,?,?,?,?)",
+          incidentId,
+          p.id,
+          r.id,
+          me(res).id,
+          b.reason,
+          JSON.stringify([...new Set(affected)]),
+          "open",
+          null,
+          now(),
+          null,
+        );
+        for (const member of many(
+          "SELECT email,min_version FROM members WHERE project_id=? AND status='active'",
+          p.id,
+        )) {
+          const visibleAffected = affected.some(
+            (rid) =>
+              (one("SELECT version FROM releases WHERE id=?", rid)?.version ||
+                0) >= member.min_version,
+          );
+          if (visibleAffected)
+            notify(
+              p.id,
+              `security-incident:${incidentId}:${member.email}`,
+              member.email,
+              "A shared handbook was withdrawn for safety",
+              "The project sender withdrew affected online handbook content for safety review. Online access is paused. Copies already downloaded cannot be recalled. Contact the sender using your existing contact details; do not share passwords or personal information in replies.",
+            );
+        }
+      }
       audit(
         me(res).id,
         p.id,

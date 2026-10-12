@@ -46,6 +46,7 @@ npm start
 
 - `npm test`：真实 SQLite / HTTP 集成测试，覆盖租户隔离、CSRF、保存冲突、图片校验、支付幂等、版本确认、安全撤回、导出与到期。
 - `npm run test:ui`：完整交接、截图遮盖和原型补齐回归，包含 360px 手机阅读和完整回执。使用独立虚构邮箱、5183 / 3011 测试端口、`.work/e2e-data` 数据库和本地供应商模拟。
+- `npm run test:cross-browser`：在 Chromium、Firefox 和 WebKit 中运行交接、标注、导航保护及素材批次回归；先执行 `npx playwright install --with-deps chromium firefox webkit`。WebKit 不代替 macOS Safari 实机验收。
 - PDF 和浏览器测试优先使用 `CHROMIUM_EXECUTABLE_PATH`，Windows 中也可自动找到 Edge / Chrome。其他环境执行 `npx playwright install chromium`。
 - 测试截图、PDF 样例和追踪信息只放在忽略目录 `.work/` 与 `test-results/`。
 - `npm start` 服务生产构建产物和 API。生产模式还需配置 HTTPS Origin、随机会话密钥和 Resend / SMTP；详见 [部署与恢复](docs/deployment.md)。
@@ -62,4 +63,5 @@ docs/            原始 PRD、架构、接口、供应商及上线验收说明
 
 图片解码在无供应商凭据的短生命周期子进程中进行，受尺寸、像素、内存、时限和并发限制保护。发布事务同时提交快照和任务完成状态；发布快照具有数据库不可变触发器。客户资源逐请求鉴权，未采用永久公开图片地址。
 
-详细设计见 [架构](docs/architecture.md)、[API 契约](docs/api.md)、[供应商适配器](docs/providers.md)和 [实施状态](docs/implementation-status.md)。仓库原有 OpenSpec 目录和 PRD 保持可用；本次未创建待批准的 OpenSpec 变更，也未发布到外部托管平台。
+详细设计见 [架构](docs/architecture.md)、[API 契约](docs/api.md)、[供应商适配器](docs/providers.md)和 [实施状态](docs/implementation-status.md)。仓库原有 OpenSpec 目录和 PRD 保持可用；本次未创建待批准的 OpenSpec 变更。生产基础已部署，新增代码的发布状态以对应 GitHub Actions 流水线为准。
+新增非支付能力见 [补齐说明](docs/nonpayment-completion.md)：独立图片复制、持久标注、术语、发布检查、事故通知、AI 成本控制、导出进程保护和加密恢复工具。

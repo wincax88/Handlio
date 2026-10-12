@@ -29,6 +29,7 @@ export type Project = {
   };
   openQuestions: number;
   confirmation: any;
+  reading: { readers: number; clients: number };
 };
 export type Session = {
   user: null | {

@@ -91,6 +91,7 @@ Resend 接受请求记为 `accepted`。配置 `RESEND_WEBHOOK_SECRET` 并在 Res
 ```
 
 只返回结构化建议，不自动写草稿或发布：
+请求另外包含 `maxCostUsd` 和 `costCurrency: "USD"`，供应商适配器必须遵守此成本上限。返回的 `cost` 为实际美元成本；不可确认时为 `null`。应用不会把超时、未确认或空成本当成零费用。超上限以及 15 分钟内三次未确认失败会暂停该项目 AI。
 
 ```json
 {

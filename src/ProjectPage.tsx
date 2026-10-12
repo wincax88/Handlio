@@ -42,6 +42,7 @@ import { Editor } from "./Editor";
 import { Assets } from "./Assets";
 import { Handbook, Releases, Handoff, Exports } from "./ProjectTools";
 import { DraftMerge } from "./Comparison";
+import { Resources } from "./Resources";
 export type ProjectEditorProps = {
   project: Project;
   draft: Draft;
@@ -69,12 +70,24 @@ export function ProjectPage({
   const revision = useRef(0);
   const latest = useRef<Draft | null>(null);
   const persisted = useRef("");
+  const refreshGeneration = useRef(0);
   const changedAt = useRef(0);
   const inFlight = useRef<Promise<void> | null>(null);
   const blocked = useRef(false);
   const dirty = useRef(false);
-  async function refresh() {
+  async function refresh(discard = false) {
+    const generation = ++refreshGeneration.current;
+    const editTime = changedAt.current;
     const result = await api<Project>(`/projects/${id}`);
+    if (
+      generation !== refreshGeneration.current ||
+      result.revision < revision.current
+    )
+      return;
+    if (dirty.current && (!discard || changedAt.current !== editTime)) {
+      setP({ ...result, revision: revision.current, draft: latest.current! });
+      return;
+    }
     setP(result);
     setDraft(result.draft);
     latest.current = result.draft;
@@ -156,6 +169,7 @@ export function ProjectPage({
     };
     window.addEventListener("beforeunload", warn);
     return () => {
+      refreshGeneration.current++;
       clearInterval(timer);
       window.removeEventListener("beforeunload", warn);
     };
@@ -380,7 +394,7 @@ export function ProjectPage({
                     "Discard your local changes and use the saved server draft?",
                   )
                 )
-                  void refresh();
+                  void refresh(true);
               }}
             />
           )}
@@ -393,7 +407,7 @@ export function ProjectPage({
                     "Discard your local draft and reload the saved server version?",
                   )
                 )
-                  void refresh();
+                  void refresh(true);
               }}
             >
               Discard local changes and reload
@@ -445,6 +459,7 @@ function Overview(props: ProjectEditorProps) {
   const [copyName, setCopyName] = useState("");
   const [copyClient, setCopyClient] = useState("");
   const [copyReviewed, setCopyReviewed] = useState(false);
+  const [copyAssets, setCopyAssets] = useState<string[]>([]);
   const [danger, setDanger] = useState(false);
   const [busy, setBusy] = useState(false);
   const [handoff, setHandoff] = useState<any>(null);
@@ -596,6 +611,21 @@ function Overview(props: ProjectEditorProps) {
         />
       </div>
       <div className="overview-grid">
+        <div className="notice reading-summary">
+          <span>
+            Current version viewed by {p.reading.readers} / {p.reading.clients}{" "}
+            active clients. Reading is separate from receipt confirmation.
+          </span>
+        </div>
+        {e.storage >= e.limits.storage * 0.8 && (
+          <div className="notice danger">
+            <span>
+              Storage is {Math.round((e.storage / e.limits.storage) * 100)}%
+              full. Remove unused images or old export files before uploading
+              more.
+            </span>
+          </div>
+        )}
         <div>
           <section className="panel overview-handbook-list">
             <header className="panel-heading">
@@ -805,13 +835,15 @@ function Overview(props: ProjectEditorProps) {
         </Panel>
       </details>
       <section className="project-management">
+        <Resources projectId={p.id} />
         <h2>Project management</h2>
         <details className="copy-project">
           <summary>Reuse this structure for another client</summary>
           <p>
             Review the guide text for customer-specific information. The new
-            unpaid draft excludes images, support details, invited clients,
-            orders, links, questions and receipt records.
+            unpaid draft includes only the images you explicitly select. It
+            excludes support details, invited clients, orders, links, questions
+            and receipt records.
           </p>
           <div className="form-grid">
             <Field label="New project name">
@@ -829,6 +861,46 @@ function Overview(props: ProjectEditorProps) {
               />
             </Field>
           </div>
+          <fieldset className="copy-images">
+            <legend>Reviewed images to copy (optional)</legend>
+            <p className="muted">
+              Check these images for client-specific information. Each selected
+              flattened image becomes an independent copy.
+            </p>
+            {[
+              ...new Set(
+                [
+                  d.logoId,
+                  ...d.guides.flatMap((g) => g.steps.map((s) => s.assetId)),
+                ].filter(Boolean),
+              ),
+            ].map((aid) => (
+              <label className="check-field" key={aid!}>
+                <input
+                  type="checkbox"
+                  checked={copyAssets.includes(aid!)}
+                  onChange={(e) => {
+                    setCopyAssets(
+                      e.target.checked
+                        ? [...copyAssets, aid!]
+                        : copyAssets.filter((id) => id !== aid),
+                    );
+                    setCopyReviewed(false);
+                  }}
+                />
+                <img
+                  src={`/api/assets/${aid}`}
+                  alt="Reviewed image to copy"
+                  style={{ width: 120, maxHeight: 80, objectFit: "contain" }}
+                />
+                {d.logoId === aid
+                  ? "Brand logo"
+                  : d.guides
+                      .flatMap((g) => g.steps)
+                      .find((s) => s.assetId === aid)?.title}
+              </label>
+            ))}
+          </fieldset>
           <label className="check-field">
             <input
               type="checkbox"
@@ -849,6 +921,7 @@ function Overview(props: ProjectEditorProps) {
                   name: copyName,
                   clientName: copyClient,
                   reviewed: true,
+                  assetIds: copyAssets,
                 });
                 navigate(`/app/projects/${result.id}`);
               })

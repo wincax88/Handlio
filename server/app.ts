@@ -14,6 +14,11 @@ import { installJobs } from "./jobs.js";
 import { installOps } from "./ops.js";
 import { installMailWebhook } from "./mail-webhook.js";
 import { installWorkspace } from "./workspace.js";
+import { installAnnotations } from "./annotations.js";
+import { installIncidents } from "./incidents.js";
+import { installResources } from "./resources.js";
+import { installLinkChecks } from "./link-checks.js";
+import { installServiceInformation } from "./service-information.js";
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
@@ -73,6 +78,11 @@ export function createApp() {
   installAuth(app);
   installRoutes(app);
   installWorkspace(app);
+  installAnnotations(app);
+  installIncidents(app);
+  installResources(app);
+  installLinkChecks(app);
+  installServiceInformation(app);
   installBilling(app);
   installMailWebhook(app);
   installJobs(app);

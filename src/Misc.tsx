@@ -675,6 +675,12 @@ export function Help({
   );
 }
 export function Policy({ kind, session }: { kind: string; session: Session }) {
+  const [service, setService] = useState<any>(null);
+  useEffect(() => {
+    void api("/service-information")
+      .then(setService)
+      .catch(() => {});
+  }, []);
   const title =
     kind === "privacy"
       ? "Privacy & data handling"
@@ -685,13 +691,57 @@ export function Policy({ kind, session }: { kind: string; session: Session }) {
     <div className="public-document policy">
       <Back to="/">Back to Handlio</Back>
       <PageHeading eyebrow="SERVICE INFORMATION" title={title} />
+      {service && (
+        <dl className="detail-list">
+          <div>
+            <dt>Operator</dt>
+            <dd>{service.operator}</dd>
+          </div>
+          <div>
+            <dt>Operator location</dt>
+            <dd>{service.operatorRegion}</dd>
+          </div>
+          <div>
+            <dt>Production hosting region</dt>
+            <dd>{service.hostingRegion}</dd>
+          </div>
+          <div>
+            <dt>Contact</dt>
+            <dd>{service.supportEmail}</dd>
+          </div>
+        </dl>
+      )}
       <div className="notice">
-        Development policy baseline. Operator details, jurisdiction, approved
-        refund rules and provider agreements must be completed before real paid
-        service is enabled.
+        Operational information. Governing terms, approved refund rules and
+        provider agreements must be completed before real paid service is
+        enabled.
       </div>
       {kind === "privacy" ? (
         <>
+          {service && (
+            <>
+              <h2>Retention implemented by the application</h2>
+              <p>
+                Verification codes expire after{" "}
+                {service.retention.verificationMinutes} minutes and login
+                sessions after {service.retention.sessionHours} hours. Temporary
+                exports are kept for {service.retention.temporaryExportsDays}{" "}
+                days. Unreferenced processed images are eligible for cleanup
+                after {service.retention.unreferencedAssetsHours} hours; deleted
+                project content is removed within{" "}
+                {service.retention.deletedProjectCleanupDays} days. Configured
+                encrypted backups are rotated within{" "}
+                {service.retention.backupsMaximumDays} days. Downloaded client
+                copies are outside the service’s control.
+              </p>
+              <p>
+                These are application cleanup rules. The hosting region and the
+                hosting, email and optional AI providers’ own retention must be
+                confirmed separately before making broader data-location or
+                deletion commitments.
+              </p>
+            </>
+          )}
           <h2>What is processed</h2>
           <p>
             Account email, session records, project text, processed screenshots,

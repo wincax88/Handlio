@@ -73,7 +73,7 @@ export function installAuth(app: Express) {
   });
   const throttle = rateLimit({
     windowMs: 60 * 60 * 1000,
-    limit: 30,
+    limit: process.env.NODE_ENV === "test" ? 200 : 30,
     standardHeaders: "draft-7",
     legacyHeaders: false,
     message: {

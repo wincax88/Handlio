@@ -40,6 +40,15 @@ export const draftSchema = z.object({
   logoId: z.string().nullable().default(null),
   maintenance: z.string().max(2000),
   terms: z.array(z.string().max(100)).max(30),
+  glossary: z
+    .array(
+      z.object({
+        term: z.string().trim().min(1).max(100),
+        aliases: z.array(z.string().trim().min(1).max(100)).max(10),
+      }),
+    )
+    .max(30)
+    .default([]),
   guides: z.array(guideSchema).max(10),
   checklist: z
     .array(
@@ -118,6 +127,7 @@ export function createDraft(
     logoId: null,
     maintenance: "",
     terms: [],
+    glossary: [],
     guides: sections.map((t) => ({
       id: makeId(),
       title: t,

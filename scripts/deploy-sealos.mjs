@@ -133,6 +133,13 @@ try {
     "AI_ADAPTER_URL",
     "AI_ADAPTER_TOKEN",
     "AI_PRIVACY_NOTICE",
+    "AI_MAX_STEP_COST_USD",
+    "AI_DAILY_BUDGET_USD",
+    "BACKUP_KEY",
+    "BACKUP_DIRECTORY",
+    "OPERATOR_NAME",
+    "OPERATOR_REGION",
+    "DATA_HOSTING_REGION",
   ]) {
     if (env[key]) runtime[key] = env[key];
   }

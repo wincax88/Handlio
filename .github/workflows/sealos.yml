@@ -26,10 +26,10 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run build
       - run: npm test
-      - run: npm run test:ui
+      - run: npm run test:cross-browser
         env:
           DATA_DIR: ${{ runner.temp }}/handlio-e2e
           NODE_ENV: development
@@ -139,6 +139,13 @@ jobs:
       AI_ADAPTER_URL: ${{ vars.AI_ADAPTER_URL }}
       AI_ADAPTER_TOKEN: ${{ secrets.AI_ADAPTER_TOKEN }}
       AI_PRIVACY_NOTICE: ${{ vars.AI_PRIVACY_NOTICE }}
+      AI_MAX_STEP_COST_USD: ${{ vars.AI_MAX_STEP_COST_USD }}
+      AI_DAILY_BUDGET_USD: ${{ vars.AI_DAILY_BUDGET_USD }}
+      BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
+      BACKUP_DIRECTORY: ${{ vars.BACKUP_DIRECTORY }}
+      OPERATOR_NAME: ${{ vars.OPERATOR_NAME }}
+      OPERATOR_REGION: ${{ vars.OPERATOR_REGION }}
+      DATA_HOSTING_REGION: ${{ vars.DATA_HOSTING_REGION }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
