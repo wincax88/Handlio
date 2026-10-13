@@ -52,6 +52,10 @@ export function createApp() {
     express.raw({ type: "application/json", limit: "1mb" }),
   );
   app.use(
+    "/api/webhooks/dodo",
+    express.raw({ type: "application/json", limit: "1mb" }),
+  );
+  app.use(
     "/api/webhooks/resend",
     express.raw({ type: "application/json", limit: "256kb" }),
   );

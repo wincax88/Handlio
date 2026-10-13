@@ -1,6 +1,6 @@
 # 外部供应商契约
 
-供应商适配与领域逻辑分离。邮件支持 Resend HTTPS API 和兼容 SMTP；支付与 AI 采用受控服务端 HTTP 适配协议。适配器需要由实际供应商账户和政策配置后部署。
+供应商适配与领域逻辑分离。邮件支持 Resend HTTPS API 和兼容 SMTP；支付支持 Dodo Payments 官方 SDK，也保留通用 HTTP 适配协议；AI 采用受控服务端 HTTP 适配协议。
 
 ## 邮件
 
@@ -20,7 +20,46 @@ Resend 接受请求记为 `accepted`。配置 `RESEND_WEBHOOK_SECRET` 并在 Res
 
 事务通知不附截图或敏感正文，成功发出不表示客户阅读。邀请、发布、确认请求、问题、导出、支付、到期等事件按唯一键去重。发送前复核成员、分享和确认请求状态；失败最多 5 次，指数退避。
 
-## 支付适配器
+## Dodo Payments
+
+使用官方 `dodopayments` SDK 创建托管 Checkout Session，支持 $19 项目包与 $9 手动续期，两者都是一次性商品，期限为 90 天。续期不增加 AI、不自动开启分享或发布，不创建订阅。
+
+### 测试模式配置
+
+在 Dodo 控制台切换 **Test Mode**，分别创建两个美元一次性商品。价格为 `1900` / `900` 美分；关闭商品折扣、Pay What You Want、Purchasing Power Parity 和 localized pricing。建议选择税额另加；也支持 tax-inclusive 商品，服务器保存结账时的税额策略，核验总额时使用该快照。结账关闭优惠码、币种切换和邮箱编辑，使用登录账号邮箱。
+
+独立测试实例配置（使用独立 `DATA_DIR`，不连接生产数据库）：
+
+```dotenv
+NODE_ENV=development
+DATA_DIR=.data-dodo-test
+BILLING_PROVIDER=dodo
+DODO_PAYMENTS_ENVIRONMENT=test_mode
+DODO_PROJECT_PRODUCT_ID=<test-project-product-id>
+DODO_RENEWAL_PRODUCT_ID=<test-renewal-product-id>
+DODO_PAYMENTS_API_KEY=<test-api-key>
+DODO_PAYMENTS_WEBHOOK_KEY=<test-webhook-signing-key>
+```
+
+密钥只放环境变量 / Secret，不放 Git、浏览器或聊天中。选择 Dodo 后，缺少配置或 API 失败会明确报错，不能退回本地模拟。非生产实例拒绝 live_mode；生产实例拒绝 test_mode，避免测试交易污染正式权益账本。商品 ID、API Key 和 Webhook Secret 都必须来自同一模式的账户。
+
+在 Dodo 的 Developer → Webhooks 注册 `https://<TEST_HOST>/api/webhooks/dodo`，订阅 `payment.succeeded`、`payment.failed`、`payment.cancelled`、`payment.processing`、`refund.succeeded`、`refund.failed` 及所有 `dispute.*` 事件。本地开发使用 HTTPS tunnel 指向本地 API。按账户实际支持的事件名称选择；不需要订阅或 license 事件。
+
+服务端用 SDK `webhooks.unwrap` 对原始正文及 `webhook-id`、`webhook-timestamp`、`webhook-signature` 验签，接受后持久化去重并返回 200。每分钟 Worker 查询最新 Payment，核对保存的 Session、商品、数量、订单、工作区、项目、商户、模式、币种及含税总额，然后更新权益。浏览器返回的 `status` / `payment_id` 不作为开权依据。订单页可核验原结账 Session，查看真实税额和发票 PDF。未确认付款保持 pending。
+
+同一 pending 订单复用结账链接，并发请求只暴露一条链接；24 小时有效期过后先核验原 Session，再为尚未提交付款的订单创建新 Session。SDK 不自动重试创建请求。供应商未返回或本地未保存的链接不会提供给浏览器。Webhook 只存事件与付款引用，不保存卡片、地址或完整供应商正文。
+
+成功全额退款撤销订单权益，部分退款进入人工 review。Dodo 可能省略退款金额和币种明细，仍依据权威退款摘要撤销或冻结权益；账本 `refunded` 是权益判定值，不是含税现金退款总额，实际退款金额以 Dodo 为准。争议会暂停权限和分享；争议胜诉可以恢复付款贡献，但不自动恢复分享。迟到的回调重新查询当前交易，确认的退款不会被旧成功状态抹掉。退款由运营人员在 Dodo 控制台处理，用户通过现有订单审核入口提出申请。
+
+### 测试验收及正式启用
+
+配置完成后，使用 Dodo 官方测试卡完成项目购买和续期，确认回跳、签名回调、订单状态、税额、发票及截止日期；再在 Test Mode 执行退款和争议测试。观察 `/app/ops` 中 webhook 的 processed / retry / dead 状态。自动测试使用官方 SDK 加模拟 HTTPS API，覆盖验签、去重、租户隔离、金额、退款、争议、失败、过期链接和环境隔离；它不替代真实账户验收。
+
+正式启用时，在 Live Mode 创建对应商品、申请有效正式 Key 和回调签名密钥。GitHub repository / sealos environment 的 **Variables** 配置 `BILLING_PROVIDER=dodo`、`DODO_PAYMENTS_ENVIRONMENT=live_mode`、`DODO_PROJECT_PRODUCT_ID`、`DODO_RENEWAL_PRODUCT_ID`；**Secrets** 配置 `DODO_PAYMENTS_API_KEY`、`DODO_PAYMENTS_WEBHOOK_KEY`。工作流会传入运行时 Secret。在 Live Mode 注册 `https://handlio-fd5llv5c.cloud.sealos.io/api/webhooks/dodo`。上线前完成商户开通和账户验收。测试与正式实例分别维护订单数据库，不能在已有测试数据目录上直接切模式。
+
+官方参考：[Checkout Sessions](https://docs.dodopayments.com/developer-resources/checkout-session)、[Webhook 验签](https://docs.dodopayments.com/developer-resources/webhooks)、[集成指南](https://docs.dodopayments.com/developer-resources/integration-guide)。
+
+## 通用支付适配器
 
 `BILLING_ADAPTER_URL` 必须是由平台控制的 HTTPS 地址，服务端使用 `BILLING_ADAPTER_TOKEN`。真实供应商负责托管结账和权威交易查询；实现适配器时必须依据该供应商当前官方 SDK / API 完成验签、金额、商品、环境和退款映射。
 

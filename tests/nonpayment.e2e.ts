@@ -44,13 +44,11 @@ test("editable layers, guarded navigation, glossary, independent image copy and 
   })
     .png()
     .toBuffer();
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "Fictional screenshot.png",
-      mimeType: "image/png",
-      buffer: bytes,
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "Fictional screenshot.png",
+    mimeType: "image/png",
+    buffer: bytes,
+  });
   await expect(page.locator("canvas")).toBeVisible();
   page.once("dialog", (dialog) => dialog.dismiss());
   await page.getByRole("link", { name: "Guides", exact: true }).click();
@@ -98,6 +96,14 @@ test("editable layers, guarded navigation, glossary, independent image copy and 
   await expect(
     page.getByText("Uploaded safely", { exact: true }),
   ).toBeVisible();
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(`/api/projects/${pid}`)).json()).draft
+          .guides[0]?.steps[0]?.assetId,
+      { timeout: 10000 },
+    )
+    .toBeTruthy();
   let project = await (await page.request.get(`/api/projects/${pid}`)).json();
   const stepId = project.draft.guides[0].steps[0].id,
     firstImage = project.draft.guides[0].steps[0].assetId;
@@ -116,6 +122,14 @@ test("editable layers, guarded navigation, glossary, independent image copy and 
   await expect(
     page.getByText("Uploaded safely", { exact: true }),
   ).toBeVisible();
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(`/api/projects/${pid}`)).json()).draft
+          .guides[0].steps[0].assetId,
+      { timeout: 10000 },
+    )
+    .not.toBe(firstImage);
   project = await (await page.request.get(`/api/projects/${pid}`)).json();
   const secondImage = project.draft.guides[0].steps[0].assetId;
   expect(secondImage).not.toBe(firstImage);
@@ -238,20 +252,18 @@ test("a 20-file mixed batch keeps valid images and reports the invalid file befo
   })
     .png()
     .toBuffer();
-  await page
-    .locator("input[type=file]")
-    .setInputFiles([
-      ...Array.from({ length: 19 }, (_, i) => ({
-        name: `valid-${i}.png`,
-        mimeType: "image/png",
-        buffer: bytes,
-      })),
-      {
-        name: "invalid.txt",
-        mimeType: "text/plain",
-        buffer: Buffer.from("Fictional invalid screenshot"),
-      },
-    ]);
+  await page.locator("input[type=file]").setInputFiles([
+    ...Array.from({ length: 19 }, (_, i) => ({
+      name: `valid-${i}.png`,
+      mimeType: "image/png",
+      buffer: bytes,
+    })),
+    {
+      name: "invalid.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Fictional invalid screenshot"),
+    },
+  ]);
   await expect(page.getByText(/invalid.txt: use a static PNG/)).toBeVisible();
   await expect(page.locator(".asset-queue .queue-item")).toHaveCount(19);
   expect(

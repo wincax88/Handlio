@@ -35,6 +35,8 @@ export default defineConfig({
     env: {
       MAIL_PROVIDER: "local",
       BILLING_ADAPTER_URL: "",
+      BILLING_PROVIDER: "",
+      DODO_PAYMENTS_API_KEY: "",
       AI_ADAPTER_URL: "",
       DATA_DIR: `.work/e2e-data/run-${Date.now()}`,
       PORT: "3011",

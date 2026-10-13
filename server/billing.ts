@@ -18,6 +18,14 @@ import {
 import { DAY, entitlement, owner, recalculateGrants } from "./domain.js";
 import { PRICING } from "../shared/model.js";
 import { adapterRequest, localMode, notify, origin } from "./providers.js";
+import {
+  billingProvider,
+  createDodoCheckout,
+  checkDodoOrder,
+  dodoSelected,
+  retrieveDodoPayment,
+  verifyDodoEvent,
+} from "./dodo.js";
 const key = (r: Request) => String(r.get("idempotency-key") || "");
 const transactionSchema = z.object({
   id: z.string(),
@@ -75,6 +83,13 @@ export function applyTransaction(input: unknown, expectedEnvironment: string) {
       t.status === "refunded" && t.refundAmount < o.amount
         ? "review"
         : t.status;
+    if (
+      o.status === status &&
+      o.provider_transaction === t.id &&
+      o.paid_at === paidAt &&
+      o.refunded === t.refundAmount
+    )
+      return { ok: true };
     run(
       "UPDATE orders SET status=?,provider_transaction=?,paid_at=?,refunded=? WHERE id=?",
       status,
@@ -124,8 +139,21 @@ export function installBilling(app: Express) {
       ),
     );
     const p = owner(res.locals.user, order.project_id);
+    const checkout = one(
+      "SELECT environment FROM dodo_checkouts WHERE order_id=? LIMIT 1",
+      order.id,
+    );
     res.json({
       ...order,
+      provider: checkout
+        ? {
+            name: "Dodo Payments",
+            mode: checkout.environment === "live_mode" ? "live" : "test",
+          }
+        : null,
+      chargedTotal:
+        one("SELECT total FROM dodo_receipts WHERE order_id=?", order.id)
+          ?.total ?? null,
       projectName: p.name,
       entitlement: entitlement(p),
       receipt:
@@ -149,8 +177,9 @@ export function installBilling(app: Express) {
   app.get("/api/billing", authenticated, (req, res) =>
     res.json({
       pricing: PRICING,
+      provider: billingProvider(),
       orders: many(
-        "SELECT * FROM orders WHERE workspace_id=? ORDER BY created_at DESC",
+        "SELECT o.*,r.tax,r.invoice_number,d.total AS charged_total FROM orders o LEFT JOIN order_receipts r ON r.order_id=o.id LEFT JOIN dodo_receipts d ON d.order_id=o.id WHERE o.workspace_id=? ORDER BY o.created_at DESC",
         res.locals.user.workspace_id,
       ),
       grants: many(
@@ -227,6 +256,18 @@ export function installBilling(app: Express) {
       res.json({ orderId: o.id, status: o.status });
       return;
     }
+    if (dodoSelected()) {
+      const checkout = await createDodoCheckout(o, res.locals.user.email);
+      if (checkout.transaction) {
+        if (checkout.transaction.status !== "pending")
+          recordTransaction(checkout.transaction);
+        res.json({
+          orderId: o.id,
+          status: one("SELECT status FROM orders WHERE id=?", o.id)!.status,
+        });
+      } else res.json({ orderId: o.id, url: checkout.url });
+      return;
+    }
     if (!process.env.BILLING_ADAPTER_URL) {
       if (!localMode)
         throw new AppError(
@@ -270,7 +311,7 @@ export function installBilling(app: Express) {
     });
   });
   app.post("/api/billing/local-confirm", authenticated, (req, res) => {
-    if (!localMode || process.env.BILLING_ADAPTER_URL)
+    if (!localMode || process.env.BILLING_ADAPTER_URL || dodoSelected())
       throw new AppError("ACCESS_UNAVAILABLE", 404, "Unavailable.");
     const b = z.object({ orderId: z.string() }).parse(req.body);
     const o = requireValue(one("SELECT * FROM orders WHERE id=?", b.orderId));
@@ -297,7 +338,7 @@ export function installBilling(app: Express) {
     );
   });
   app.post("/api/billing/local-refund", authenticated, (req, res) => {
-    if (!localMode || process.env.BILLING_ADAPTER_URL)
+    if (!localMode || process.env.BILLING_ADAPTER_URL || dodoSelected())
       throw new AppError("ACCESS_UNAVAILABLE", 404, "Unavailable.");
     const o = requireValue(
       one("SELECT * FROM orders WHERE id=?", req.body.orderId),
@@ -321,7 +362,27 @@ export function installBilling(app: Express) {
       ),
     );
   });
+  app.post("/api/webhooks/dodo", (req, res) => {
+    const event = verifyDodoEvent(req.body, {
+      "webhook-id": req.get("webhook-id") || "",
+      "webhook-signature": req.get("webhook-signature") || "",
+      "webhook-timestamp": req.get("webhook-timestamp") || "",
+    });
+    if (event)
+      run(
+        "INSERT OR IGNORE INTO webhooks VALUES (?,?,?,?,?,?)",
+        event.eventId,
+        event.transactionId,
+        JSON.stringify(event),
+        "queued",
+        0,
+        now(),
+      );
+    res.json({ received: true });
+  });
   app.post("/api/webhooks/billing", (req, res) => {
+    if (dodoSelected())
+      throw new AppError("ACCESS_UNAVAILABLE", 404, "Unavailable.");
     const secret = process.env.BILLING_WEBHOOK_SECRET;
     if (!secret)
       throw new AppError(
@@ -372,7 +433,7 @@ export function installBilling(app: Express) {
 }
 export async function reconcileOrder(orderId: string, actorId: string) {
   const order = requireValue(one("SELECT * FROM orders WHERE id=?", orderId));
-  if (!process.env.BILLING_ADAPTER_URL) {
+  if (!process.env.BILLING_ADAPTER_URL && !dodoSelected()) {
     if (!localMode)
       throw new AppError(
         "PROVIDER_UNAVAILABLE",
@@ -401,9 +462,16 @@ export async function reconcileOrder(orderId: string, actorId: string) {
       orderId,
     });
   });
-  const raw = await adapterRequest(
-    "billing",
-    `/orders/${encodeURIComponent(order.id)}`,
+  const raw = requireValue(
+    dodoSelected()
+      ? await checkDodoOrder(order)
+      : await adapterRequest(
+          "billing",
+          `/orders/${encodeURIComponent(order.id)}`,
+        ),
+    "PAYMENT_MISMATCH",
+    400,
+    "Payment details do not match the order.",
   );
   if (raw.status === "pending") {
     if (raw.orderId !== order.id)
@@ -420,41 +488,66 @@ export async function reconcileOrder(orderId: string, actorId: string) {
         400,
         "Payment details do not match the order.",
       );
-    applyTransaction(
-      transaction,
-      process.env.NODE_ENV === "production" ? "production" : "sandbox",
-    );
-    const receipt = z
-      .object({
-        tax: z.number().int().nonnegative().nullable().default(null),
-        receiptUrl: z
-          .string()
-          .url()
-          .refine((v) => v.startsWith("https://"))
-          .nullable()
-          .default(null),
-        invoiceNumber: z.string().max(200).nullable().default(null),
-      })
-      .safeParse(raw);
-    if (receipt.success)
-      run(
-        "INSERT INTO order_receipts VALUES (?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET tax=excluded.tax,receipt_url=excluded.receipt_url,invoice_number=excluded.invoice_number",
-        order.id,
-        receipt.data.tax,
-        receipt.data.receiptUrl,
-        receipt.data.invoiceNumber,
-      );
+    recordTransaction({ ...raw, ...transaction });
   }
   return {
     status: requireValue(one("SELECT status FROM orders WHERE id=?", order.id))
       .status,
   };
 }
+function recordTransaction(raw: any) {
+  applyTransaction(
+    raw,
+    process.env.NODE_ENV === "production" ? "production" : "sandbox",
+  );
+  const receipt = z
+    .object({
+      tax: z.number().int().nonnegative().nullable().default(null),
+      receiptUrl: z
+        .string()
+        .url()
+        .refine((v) => v.startsWith("https://"))
+        .nullable()
+        .default(null),
+      invoiceNumber: z.string().max(200).nullable().default(null),
+    })
+    .safeParse(raw);
+  if (receipt.success)
+    run(
+      "INSERT INTO order_receipts VALUES (?,?,?,?) ON CONFLICT(order_id) DO UPDATE SET tax=excluded.tax,receipt_url=excluded.receipt_url,invoice_number=excluded.invoice_number",
+      raw.orderId,
+      receipt.data.tax,
+      receipt.data.receiptUrl,
+      receipt.data.invoiceNumber,
+    );
+  if (Number.isSafeInteger(raw.total) && raw.total >= 0)
+    run(
+      "INSERT INTO dodo_receipts VALUES (?,?) ON CONFLICT(order_id) DO UPDATE SET total=excluded.total",
+      raw.orderId,
+      raw.total,
+    );
+}
 export async function processWebhooks() {
   for (const e of many(
     "SELECT * FROM webhooks WHERE status IN ('queued','retry') AND attempts<5 ORDER BY created_at LIMIT 5",
   )) {
     try {
+      const event = JSON.parse(e.body);
+      if (event.provider === "dodo") {
+        if (
+          event.environment !==
+          (process.env.DODO_PAYMENTS_ENVIRONMENT || "test_mode")
+        )
+          throw new Error("environment mismatch");
+        const t = await retrieveDodoPayment(e.transaction_id, event.businessId);
+        if (t && t.status !== "pending") recordTransaction(t);
+        run(
+          "UPDATE webhooks SET status=?,attempts=attempts+1 WHERE id=?",
+          t ? "processed" : "ignored",
+          e.id,
+        );
+        continue;
+      }
       const t = await adapterRequest(
         "billing",
         `/transactions/${encodeURIComponent(e.transaction_id)}`,

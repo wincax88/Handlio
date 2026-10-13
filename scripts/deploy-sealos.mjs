@@ -26,9 +26,16 @@ if (
 }
 if (!image || !/^ghcr\.io\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/.test(image))
   throw new Error("A GHCR image digest is required.");
-const provider = env.MAIL_PROVIDER || 'smtp';
-if (!['resend', 'smtp'].includes(provider)) throw new Error('Production MAIL_PROVIDER must be resend or smtp.');
-const required = ["SESSION_SECRET", "MAIL_FROM", ...(provider === 'resend' ? ['RESEND_API_KEY', 'MAIL_AUTH_FROM'] : ['SMTP_HOST'])];
+const provider = env.MAIL_PROVIDER || "smtp";
+if (!["resend", "smtp"].includes(provider))
+  throw new Error("Production MAIL_PROVIDER must be resend or smtp.");
+const required = [
+  "SESSION_SECRET",
+  "MAIL_FROM",
+  ...(provider === "resend"
+    ? ["RESEND_API_KEY", "MAIL_AUTH_FROM"]
+    : ["SMTP_HOST"]),
+];
 const missing = required.filter((key) => !env[key]);
 if (missing.length)
   throw new Error(
@@ -36,6 +43,22 @@ if (missing.length)
   );
 if (env.SESSION_SECRET.length < 32)
   throw new Error("SESSION_SECRET must contain at least 32 characters.");
+if (env.BILLING_PROVIDER === "dodo") {
+  const dodoMissing = [
+    "DODO_PAYMENTS_API_KEY",
+    "DODO_PAYMENTS_WEBHOOK_KEY",
+    "DODO_PROJECT_PRODUCT_ID",
+    "DODO_RENEWAL_PRODUCT_ID",
+  ].filter((key) => !env[key]);
+  if (dodoMissing.length)
+    throw new Error(
+      `Configure Dodo Payments before enabling billing: ${dodoMissing.join(", ")}`,
+    );
+  if (env.DODO_PAYMENTS_ENVIRONMENT !== "live_mode")
+    throw new Error(
+      "Production requires DODO_PAYMENTS_ENVIRONMENT=live_mode. Test mode needs a separate development instance and database.",
+    );
+}
 if (!/^[0-9]+$/.test(env.SMTP_PORT || "587"))
   throw new Error("SMTP_PORT must be numeric.");
 if (!env.SEALOS_TLS_SECRET || !/^[a-z0-9.-]+$/.test(env.SEALOS_TLS_SECRET))
@@ -130,6 +153,12 @@ try {
     "BILLING_ADAPTER_URL",
     "BILLING_ADAPTER_TOKEN",
     "BILLING_WEBHOOK_SECRET",
+    "BILLING_PROVIDER",
+    "DODO_PAYMENTS_ENVIRONMENT",
+    "DODO_PAYMENTS_API_KEY",
+    "DODO_PAYMENTS_WEBHOOK_KEY",
+    "DODO_PROJECT_PRODUCT_ID",
+    "DODO_RENEWAL_PRODUCT_ID",
     "AI_ADAPTER_URL",
     "AI_ADAPTER_TOKEN",
     "AI_PRIVACY_NOTICE",

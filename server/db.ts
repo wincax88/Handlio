@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS worker_state (name TEXT PRIMARY KEY, last_success_at 
 CREATE TABLE IF NOT EXISTS ai_controls (project_id TEXT PRIMARY KEY REFERENCES projects(id), budget_micros INTEGER NOT NULL, paused INTEGER NOT NULL, reason TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS asset_quality (asset_id TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE, result TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS link_checks (project_id TEXT NOT NULL, revision INTEGER NOT NULL, url TEXT NOT NULL, status TEXT NOT NULL, checked_at INTEGER NOT NULL, PRIMARY KEY(project_id,revision,url));
+CREATE TABLE IF NOT EXISTS dodo_checkouts (id TEXT PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id), session_id TEXT UNIQUE, product_id TEXT NOT NULL, business_id TEXT NOT NULL, environment TEXT NOT NULL, amount INTEGER NOT NULL, tax_inclusive INTEGER NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, checkout_url TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dodo_creation ON dodo_checkouts(order_id) WHERE status='creating';
+CREATE INDEX IF NOT EXISTS idx_dodo_orders ON dodo_checkouts(order_id,created_at);
+CREATE TABLE IF NOT EXISTS dodo_receipts (order_id TEXT PRIMARY KEY REFERENCES orders(id), total INTEGER NOT NULL);
 `);
 // SQL is always parameterized. JSON snapshots remain immutable after publication.
 export type Row = Record<string, any>;

@@ -98,6 +98,11 @@ export function Billing({ session }: { session: Session }) {
         }
       />
       <ErrorNotice error={error} />
+      {data?.provider?.mode === "test" && (
+        <p className="notice">
+          Dodo Payments test mode · Test payments do not make a real charge.
+        </p>
+      )}
       <div className="billing-layout">
         <div>
           <section className="panel entitlement-list">
@@ -243,6 +248,7 @@ export function Billing({ session }: { session: Session }) {
                 <Button
                   disabled={
                     busy ||
+                    (!session.localMode && !session.billingEnabled) ||
                     !p ||
                     (!!renewal && !renewalAcknowledged) ||
                     ["expired", "revoked"].includes(p.entitlement.state) ||
@@ -261,7 +267,8 @@ export function Billing({ session }: { session: Session }) {
                           "started",
                         );
                         location.assign(c.url);
-                      }
+                      } else if (!c.local)
+                        navigate(`/app/payment/${c.orderId}`);
                     })
                   }
                 >
@@ -354,10 +361,16 @@ export function Billing({ session }: { session: Session }) {
                             {new Intl.NumberFormat("en", {
                               style: "currency",
                               currency: o.currency,
-                            }).format(o.amount / 100)}
+                            }).format((o.charged_total ?? o.amount) / 100)}
                           </strong>
                           <small>
-                            {o.currency} · Tax / invoice unavailable
+                            {o.currency} ·{" "}
+                            {o.tax != null
+                              ? `Tax ${new Intl.NumberFormat("en", { style: "currency", currency: o.currency }).format(o.tax / 100)}`
+                              : "Tax unavailable"}
+                            {o.invoice_number
+                              ? ` · ${o.invoice_number}`
+                              : " · Invoice unavailable"}
                           </small>
                         </td>
                         <td>
@@ -380,21 +393,24 @@ export function Billing({ session }: { session: Session }) {
                           >
                             Details / support
                           </Link>
-                          {session.localMode && o.status === "paid" && (
-                            <Button
-                              kind="text"
-                              disabled={busy}
-                              onClick={() =>
-                                void action(async () => {
-                                  await send("/billing/local-refund", {
-                                    orderId: o.id,
-                                  });
-                                })
-                              }
-                            >
-                              Simulate full refund
-                            </Button>
-                          )}
+                          {session.localMode &&
+                            !session.billingEnabled &&
+                            !data?.provider &&
+                            o.status === "paid" && (
+                              <Button
+                                kind="text"
+                                disabled={busy}
+                                onClick={() =>
+                                  void action(async () => {
+                                    await send("/billing/local-refund", {
+                                      orderId: o.id,
+                                    });
+                                  })
+                                }
+                              >
+                                Simulate full refund
+                              </Button>
+                            )}
                         </td>
                       </tr>
                     ))}

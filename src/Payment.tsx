@@ -88,6 +88,11 @@ export function PaymentPage({
       />
       <ErrorNotice error={error} />
       <Panel title="Order details">
+        {order.provider?.mode === "test" && (
+          <p className="notice">
+            Dodo Payments test order · No real payment has been made.
+          </p>
+        )}
         <dl className="detail-list">
           <div>
             <dt>Project</dt>
@@ -106,8 +111,16 @@ export function PaymentPage({
             </dd>
           </div>
           <div>
-            <dt>Total</dt>
+            <dt>Package price</dt>
             <dd>{money(order.amount)}</dd>
+          </div>
+          <div>
+            <dt>Charged total (including tax)</dt>
+            <dd>
+              {order.chargedTotal != null
+                ? money(order.chargedTotal)
+                : "Unavailable from provider"}
+            </dd>
           </div>
           <div>
             <dt>Tax</dt>
@@ -180,7 +193,7 @@ export function PaymentPage({
             Request order review
           </Link>
         </div>
-        {session.localMode && (
+        {session.localMode && !order.provider && (
           <p className="muted">
             Local development order. Payment simulation does not make a real
             charge.
