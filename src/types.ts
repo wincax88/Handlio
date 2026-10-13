@@ -44,5 +44,6 @@ export type Session = {
   aiEnabled: boolean;
   aiNotice: string;
   billingEnabled: boolean;
+  paymentEnvironment?: "production" | "sandbox";
   supportEmail: string;
 };

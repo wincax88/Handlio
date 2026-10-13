@@ -368,7 +368,11 @@ function Shell({
               )}
             </div>
             <Badge>
-              {session.localMode ? "Local workspace" : "Private workspace"}
+              {session.localMode
+                ? "Local workspace"
+                : session.paymentEnvironment === "sandbox"
+                  ? "Test workspace"
+                  : "Private workspace"}
             </Badge>
             <div className="notifications-control">
               <button
@@ -424,6 +428,12 @@ function Shell({
           <div className="local-banner">
             Local development · Email codes and payment simulation are available
             for testing. No real charge is made.
+          </div>
+        )}
+        {!session.localMode && session.paymentEnvironment === "sandbox" && (
+          <div className="local-banner">
+            Test workspace · Dodo Payments test mode. Purchases do not make a
+            real charge.
           </div>
         )}
         <main

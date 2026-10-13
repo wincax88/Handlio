@@ -18,6 +18,7 @@ import {
 import { DAY, entitlement, owner, recalculateGrants } from "./domain.js";
 import { PRICING } from "../shared/model.js";
 import { adapterRequest, localMode, notify, origin } from "./providers.js";
+import { expectedPaymentEnvironment } from "./payment-instance.js";
 import {
   billingProvider,
   createDodoCheckout,
@@ -496,10 +497,7 @@ export async function reconcileOrder(orderId: string, actorId: string) {
   };
 }
 function recordTransaction(raw: any) {
-  applyTransaction(
-    raw,
-    process.env.NODE_ENV === "production" ? "production" : "sandbox",
-  );
+  applyTransaction(raw, expectedPaymentEnvironment());
   const receipt = z
     .object({
       tax: z.number().int().nonnegative().nullable().default(null),
@@ -553,10 +551,7 @@ export async function processWebhooks() {
         `/transactions/${encodeURIComponent(e.transaction_id)}`,
       );
       if (t.id !== e.transaction_id) throw new Error("transaction mismatch");
-      applyTransaction(
-        t,
-        process.env.NODE_ENV === "production" ? "production" : "sandbox",
-      );
+      applyTransaction(t, expectedPaymentEnvironment());
       run(
         "UPDATE webhooks SET status='processed',attempts=attempts+1 WHERE id=?",
         e.id,

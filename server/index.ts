@@ -8,6 +8,7 @@ import {
 } from "./backup-store.js";
 import { now, one, run } from "./db.js";
 import path from "node:path";
+import { validatePaymentInstance } from "./payment-instance.js";
 if (process.env.NODE_ENV === "production") {
   if (
     !process.env.APP_ORIGIN?.startsWith("https://") ||
@@ -18,6 +19,7 @@ if (process.env.NODE_ENV === "production") {
     );
 }
 validateMailConfiguration(process.env);
+validatePaymentInstance();
 const app = createApp();
 const port = Number(process.env.PORT || 3001);
 const server = app.listen(

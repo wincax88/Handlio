@@ -23,6 +23,7 @@ import {
 } from "./db.js";
 import { localMode, origin, sendMail } from "./providers.js";
 import { billingAvailable } from "./dodo.js";
+import { expectedPaymentEnvironment } from "./payment-instance.js";
 const secret =
   process.env.SESSION_SECRET || "local-only-development-session-secret-32";
 const digest = (code: string, email: string, purpose: string, scope: string) =>
@@ -283,6 +284,7 @@ export function installAuth(app: Express) {
       aiEnabled: !!process.env.AI_ADAPTER_URL,
       aiNotice: process.env.AI_PRIVACY_NOTICE || "",
       billingEnabled: billingAvailable(),
+      paymentEnvironment: expectedPaymentEnvironment(),
       supportEmail: process.env.SUPPORT_EMAIL || "support@example.com",
     });
   });

@@ -3,12 +3,27 @@ import { mkdtempSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHmac } from "node:crypto";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const env = process.env;
+const sandbox = env.PAYMENTS_SANDBOX_INSTANCE === "1";
+const appName = sandbox ? "handlio-sandbox" : "handlio";
+const runtimeName = sandbox ? "handlio-runtime-sandbox" : "handlio-runtime";
+const registrySecretName = sandbox
+  ? "handlio-registry-sandbox"
+  : "handlio-registry";
 const namespace = env.SEALOS_NAMESPACE;
 const image = env.DEPLOY_IMAGE;
 const origin = new URL(env.APP_ORIGIN || "https://invalid.local");
+if (
+  sandbox &&
+  (!env.PRODUCTION_APP_ORIGIN ||
+    origin.origin === new URL(env.PRODUCTION_APP_ORIGIN).origin)
+)
+  throw new Error(
+    "The payment sandbox must have an HTTPS origin distinct from the production application.",
+  );
 if (!namespace || !/^[a-z0-9-]+$/.test(namespace))
   throw new Error("SEALOS_NAMESPACE is required.");
 if (
@@ -54,11 +69,15 @@ if (env.BILLING_PROVIDER === "dodo") {
     throw new Error(
       `Configure Dodo Payments before enabling billing: ${dodoMissing.join(", ")}`,
     );
-  if (env.DODO_PAYMENTS_ENVIRONMENT !== "live_mode")
+  if (env.DODO_PAYMENTS_ENVIRONMENT !== (sandbox ? "test_mode" : "live_mode"))
     throw new Error(
-      "Production requires DODO_PAYMENTS_ENVIRONMENT=live_mode. Test mode needs a separate development instance and database.",
+      "Dodo mode must match the isolated deployment: live_mode for production, test_mode for payment sandbox.",
     );
 }
+if (sandbox && env.BILLING_PROVIDER !== "dodo")
+  throw new Error(
+    "The isolated payment sandbox requires BILLING_PROVIDER=dodo.",
+  );
 if (!/^[0-9]+$/.test(env.SMTP_PORT || "587"))
   throw new Error("SMTP_PORT must be numeric.");
 if (!env.SEALOS_TLS_SECRET || !/^[a-z0-9.-]+$/.test(env.SEALOS_TLS_SECRET))
@@ -133,8 +152,40 @@ try {
     throw new Error(
       "Kubeconfig context namespace differs from SEALOS_NAMESPACE.",
     );
+  if (sandbox) {
+    const ingresses = JSON.parse(
+      kubectl(["get", "ingress", "-o", "json"], { capture: true }),
+    );
+    if (
+      ingresses.items.some(
+        (item) =>
+          item.metadata.name !== appName &&
+          item.spec.rules?.some((rule) => rule.host === origin.hostname),
+      )
+    )
+      throw new Error(
+        "The sandbox origin is already used by another application ingress.",
+      );
+    const existing = kubectl(
+      ["get", "deployment", appName, "--ignore-not-found", "-o", "json"],
+      { capture: true },
+    );
+    if (
+      existing &&
+      !JSON.parse(existing).spec.template.spec.volumes.some(
+        (v) => v.persistentVolumeClaim?.claimName === "handlio-data-sandbox",
+      )
+    )
+      throw new Error(
+        "Refuse sandbox deployment without its independent data volume.",
+      );
+  }
   const runtime = {
-    SESSION_SECRET: env.SESSION_SECRET,
+    SESSION_SECRET: sandbox
+      ? createHmac("sha256", env.SESSION_SECRET)
+          .update("handlio-payment-sandbox")
+          .digest("hex")
+      : env.SESSION_SECRET,
     APP_ORIGIN: origin.origin,
     MAIL_PROVIDER: provider,
     SMTP_PORT: env.SMTP_PORT || "587",
@@ -170,8 +221,17 @@ try {
     "OPERATOR_REGION",
     "DATA_HOSTING_REGION",
   ]) {
+    if (
+      sandbox &&
+      (key.startsWith("AI_") ||
+        key.startsWith("BACKUP_") ||
+        key.startsWith("BILLING_ADAPTER") ||
+        key === "BILLING_WEBHOOK_SECRET")
+    )
+      continue;
     if (env[key]) runtime[key] = env[key];
   }
+  if (sandbox) runtime.PAYMENTS_SANDBOX_INSTANCE = "1";
   const secretPath = path.join(work, "runtime.json");
   writeFileSync(
     secretPath,
@@ -179,7 +239,7 @@ try {
       apiVersion: "v1",
       kind: "Secret",
       type: "Opaque",
-      metadata: { name: "handlio-runtime", namespace },
+      metadata: { name: runtimeName, namespace },
       stringData: runtime,
     }),
     { mode: 0o600 },
@@ -204,6 +264,38 @@ try {
       ]),
     },
   ];
+  if (sandbox) {
+    patches.push({
+      target: { kind: "Deployment", name: "handlio" },
+      patch: JSON.stringify([
+        {
+          op: "replace",
+          path: "/spec/template/spec/containers/0/envFrom/0/secretRef/name",
+          value: runtimeName,
+        },
+        {
+          op: "replace",
+          path: "/spec/template/spec/containers/0/env/2/value",
+          value: "/app/sandbox-data",
+        },
+        {
+          op: "replace",
+          path: "/spec/template/spec/containers/0/volumeMounts/0/mountPath",
+          value: "/app/sandbox-data",
+        },
+      ]),
+    });
+    patches.push({
+      target: { kind: "PersistentVolumeClaim", name: "handlio-data" },
+      patch: JSON.stringify([
+        {
+          op: "replace",
+          path: "/spec/resources/requests/storage",
+          value: "1Gi",
+        },
+      ]),
+    });
+  }
   if (env.GHCR_READ_TOKEN) {
     if (!env.GHCR_USERNAME)
       throw new Error("GHCR_USERNAME is required for private images.");
@@ -217,7 +309,7 @@ try {
         apiVersion: "v1",
         kind: "Secret",
         type: "kubernetes.io/dockerconfigjson",
-        metadata: { name: "handlio-registry", namespace },
+        metadata: { name: registrySecretName, namespace },
         stringData: {
           ".dockerconfigjson": JSON.stringify({
             auths: { "ghcr.io": { auth } },
@@ -239,7 +331,7 @@ try {
         {
           op: "add",
           path: "/spec/template/spec/imagePullSecrets",
-          value: [{ name: "handlio-registry" }],
+          value: [{ name: registrySecretName }],
         },
       ]),
     });
@@ -263,6 +355,15 @@ try {
       apiVersion: "kustomize.config.k8s.io/v1beta1",
       kind: "Kustomization",
       namespace,
+      ...(sandbox
+        ? {
+            nameSuffix: "-sandbox",
+            commonLabels: {
+              app: "handlio-sandbox",
+              "cloud.sealos.io/app-deploy-manager": "handlio-sandbox",
+            },
+          }
+        : {}),
       resources: ["resources.yaml"],
       images: [{ name: "ghcr.io/wincax88/handlio", newName, digest }],
       patches,
@@ -281,7 +382,7 @@ try {
   kubectl([
     "rollout",
     "status",
-    "deployment/handlio",
+    `deployment/${appName}`,
     "--timeout=600s",
     "--request-timeout=0",
   ]);

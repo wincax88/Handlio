@@ -41,7 +41,23 @@ DODO_PAYMENTS_API_KEY=<test-api-key>
 DODO_PAYMENTS_WEBHOOK_KEY=<test-webhook-signing-key>
 ```
 
-密钥只放环境变量 / Secret，不放 Git、浏览器或聊天中。选择 Dodo 后，缺少配置或 API 失败会明确报错，不能退回本地模拟。非生产实例拒绝 live_mode；生产实例拒绝 test_mode，避免测试交易污染正式权益账本。商品 ID、API Key 和 Webhook Secret 都必须来自同一模式的账户。
+密钥只放环境变量 / Secret，不放 Git、浏览器或聊天中。选择 Dodo 后，缺少配置或 API 失败会明确报错，不能退回本地模拟。非生产实例拒绝 live_mode；正式业务实例拒绝 test_mode。商品 ID、API Key 和 Webhook Secret 都必须来自同一模式的账户。
+
+### Sealos 独立托管测试实例
+
+`.github/workflows/dodo-sandbox.yml` 通过手动触发建立 `handlio-sandbox` 应用，默认 HTTPS 域名为 `handlio-test-fd5llv5c.cloud.sealos.io`。它使用独立的 1Gi `handlio-data-sandbox` PVC、独立运行时 Secret 和派生的独立会话密钥，不复制生产数据、AI 适配器或备份凭据。商品 ID 可以放 GitHub Variables 或 Secrets；API Key 与 Signing secret 放 Secrets。当前这四项应为 Dodo Test Mode 的配置。
+
+托管测试服务继续使用 `NODE_ENV=production` 的 HTTPS、邮件验证码、安全 Cookie、CSRF 和限流，仅在 `PAYMENTS_SANDBOX_INSTANCE=1` 且数据库已标记为 sandbox 时允许 test_mode 支付权益。挂载目录必须为 `/app/sandbox-data`。首次初始化拒绝已有用户、项目或订单数据；已标记的 live / sandbox 数据库不能切换实例类型。部署脚本拒绝与正式站点相同的 Origin、冲突 Ingress 或共用生产数据卷。正式实例不设置该标志。
+
+先完成当前 revision 的正常 CI / 镜像构建，再运行：
+
+```sh
+gh workflow run dodo-sandbox.yml --repo wincax88/Handlio
+```
+
+工作流只查询 Dodo 测试商品以确认 Key、USD 19 / 9 定价和一次性商品类型，不创建付款。部署后验证公开 HTTPS、支付能力及未签名回调返回 401。Dodo 的测试端点填写该测试域名下的 `/api/webhooks/dodo`；创建或更换端点后，同步更新它的 Signing secret，再重新运行测试部署。测试与正式付款的商品和密钥分开维护，不能直接把这套测试 Secrets 当作正式收款配置。
+
+自定义 `test.handlio.cloud` 需要先在 DNS 添加指向 Sealos 测试域名的 CNAME，并在 Sealos 完成域名与 TLS 证书绑定；DNS 记录本身不提供该自定义域名的 HTTPS 证书。绑定验收前使用 Sealos 提供的 HTTPS 域名。
 
 在 Dodo 的 Developer → Webhooks 注册 `https://<TEST_HOST>/api/webhooks/dodo`，订阅 `payment.succeeded`、`payment.failed`、`payment.cancelled`、`payment.processing`、`refund.succeeded`、`refund.failed` 及所有 `dispute.*` 事件。本地开发使用 HTTPS tunnel 指向本地 API。按账户实际支持的事件名称选择；不需要订阅或 license 事件。
 

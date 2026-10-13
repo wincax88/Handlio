@@ -1,0 +1,100 @@
+name: Deploy isolated Dodo test instance to Sealos
+
+on:
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: Verified HTTPS origin for the isolated test instance
+        required: true
+        default: https://handlio-test-fd5llv5c.cloud.sealos.io
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sealos-dodo-sandbox
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: sealos
+    env:
+      SEALOS_NAMESPACE: ${{ vars.SEALOS_NAMESPACE }}
+      SEALOS_TLS_SECRET: ${{ vars.SEALOS_TLS_SECRET }}
+      APP_ORIGIN: ${{ inputs.origin }}
+      PRODUCTION_APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      MAIL_PROVIDER: ${{ vars.MAIL_PROVIDER }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      MAIL_FROM: ${{ secrets.MAIL_FROM }}
+      MAIL_AUTH_FROM: ${{ secrets.MAIL_AUTH_FROM }}
+      MAIL_REPLY_TO: ${{ vars.MAIL_REPLY_TO }}
+      SUPPORT_EMAIL: ${{ vars.SUPPORT_EMAIL }}
+      OPS_EMAILS: ${{ vars.OPS_EMAILS }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ vars.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      GHCR_USERNAME: ${{ github.repository_owner }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+      BILLING_PROVIDER: dodo
+      PAYMENTS_SANDBOX_INSTANCE: '1'
+      DODO_PAYMENTS_ENVIRONMENT: test_mode
+      DODO_PAYMENTS_API_KEY: ${{ secrets.DODO_PAYMENTS_API_KEY }}
+      DODO_PAYMENTS_WEBHOOK_KEY: ${{ secrets.DODO_PAYMENTS_WEBHOOK_KEY }}
+      DODO_PROJECT_PRODUCT_ID: ${{ vars.DODO_TEST_PROJECT_PRODUCT_ID || vars.DODO_PROJECT_PRODUCT_ID || secrets.DODO_PROJECT_PRODUCT_ID }}
+      DODO_RENEWAL_PRODUCT_ID: ${{ vars.DODO_TEST_RENEWAL_PRODUCT_ID || vars.DODO_RENEWAL_PRODUCT_ID || secrets.DODO_RENEWAL_PRODUCT_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Verify test-mode API and fixed product prices without charging
+        run: node scripts/verify-dodo.mjs
+      - name: Resolve the image for this tested revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          token=$(curl --fail --silent --show-error 'https://ghcr.io/token?service=ghcr.io&scope=repository:wincax88/handlio:pull' | jq -r .token)
+          echo "::add-mask::$token"
+          digest=$(curl --fail --silent --show-error -I -H "Authorization: Bearer $token" -H 'Accept: application/vnd.oci.image.index.v1+json' "https://ghcr.io/v2/wincax88/handlio/manifests/sha-$GITHUB_SHA" | awk 'tolower($1)=="docker-content-digest:" {gsub("\r", "", $2); print $2}')
+          test -n "$digest"
+          echo "DEPLOY_IMAGE=ghcr.io/wincax88/handlio@$digest" >> "$GITHUB_ENV"
+      - name: Install kubectl
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error -LO https://dl.k8s.io/release/v1.28.15/bin/linux/amd64/kubectl
+          curl --fail --silent --show-error -LO https://dl.k8s.io/release/v1.28.15/bin/linux/amd64/kubectl.sha256
+          echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+      - name: Write private cluster credential
+        env:
+          SEALOS_KUBECONFIG: ${{ secrets.SEALOS_KUBECONFIG }}
+        run: |
+          test -n "$SEALOS_KUBECONFIG"
+          umask 077
+          printf '%s' "$SEALOS_KUBECONFIG" > "$RUNNER_TEMP/handlio-sandbox-kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/handlio-sandbox-kubeconfig" >> "$GITHUB_ENV"
+      - name: Deploy independent sandbox volume, service and HTTPS ingress
+        run: node scripts/deploy-sealos.mjs
+      - name: Verify public test checkout capability and reject unsigned callbacks
+        run: |
+          node --input-type=module -e '
+            const origin = process.env.APP_ORIGIN;
+            const session = await (await fetch(origin + "/api/session")).json();
+            if (!session.billingEnabled || session.localMode || session.paymentEnvironment !== "sandbox") throw new Error("Hosted sandbox configuration is incomplete");
+            const response = await fetch(origin + "/api/webhooks/dodo", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+            if (response.status !== 401) throw new Error("Unsigned callback must be rejected");
+            console.log("Hosted test billing enabled; unsigned callback rejected. No charge created.");
+          '
+      - name: Remove private credential
+        if: always()
+        run: rm -f "$RUNNER_TEMP/handlio-sandbox-kubeconfig"

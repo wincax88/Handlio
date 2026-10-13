@@ -50,7 +50,14 @@ test("hosted checkout return stays pending until server verification and shows a
   const orderId = "dodo-ui-order",
     checkoutUrl = "https://test.checkout.dodopayments.com/session/cks_ui";
   await page.route("**/api/session", async (route) =>
-    route.fulfill({ json: { ...session, billingEnabled: true } }),
+    route.fulfill({
+      json: {
+        ...session,
+        localMode: false,
+        paymentEnvironment: "sandbox",
+        billingEnabled: true,
+      },
+    }),
   );
   await page.route("**/api/billing", async (route) =>
     route.fulfill({
@@ -107,7 +114,10 @@ test("hosted checkout return stays pending until server verification and shows a
     route.fulfill({ json: { status: "pending" } }),
   );
   await page.goto(`/app/billing?project=${projectId}`);
-  await expect(page.getByText(/Dodo Payments test mode/)).toBeVisible();
+  await expect(
+    page.getByText(/Dodo Payments test mode · Test payments/),
+  ).toBeVisible();
+  await expect(page.locator(".local-banner")).toContainText("Test workspace");
   await page
     .getByRole("button", { name: "Continue to checkout", exact: true })
     .click();

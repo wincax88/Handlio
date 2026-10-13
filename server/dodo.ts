@@ -2,6 +2,7 @@ import DodoPayments from "dodopayments";
 import { z } from "zod";
 import { AppError, id, now, one, run, tx, type Row } from "./db.js";
 import { origin } from "./providers.js";
+import { expectedPaymentEnvironment } from "./payment-instance.js";
 
 export const dodoSelected = () => process.env.BILLING_PROVIDER === "dodo";
 const mode = () => process.env.DODO_PAYMENTS_ENVIRONMENT || "test_mode";
@@ -13,7 +14,9 @@ export function dodoReady() {
     process.env.DODO_PROJECT_PRODUCT_ID &&
     process.env.DODO_RENEWAL_PRODUCT_ID &&
     mode() ===
-      (process.env.NODE_ENV === "production" ? "live_mode" : "test_mode")
+      (expectedPaymentEnvironment() === "production"
+        ? "live_mode"
+        : "test_mode")
   );
 }
 export const billingAvailable = () =>

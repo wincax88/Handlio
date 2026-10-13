@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS dodo_checkouts (id TEXT PRIMARY KEY, order_id TEXT NO
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dodo_creation ON dodo_checkouts(order_id) WHERE status='creating';
 CREATE INDEX IF NOT EXISTS idx_dodo_orders ON dodo_checkouts(order_id,created_at);
 CREATE TABLE IF NOT EXISTS dodo_receipts (order_id TEXT PRIMARY KEY REFERENCES orders(id), total INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS billing_instance (singleton INTEGER PRIMARY KEY CHECK(singleton=1), kind TEXT NOT NULL);
 `);
 // SQL is always parameterized. JSON snapshots remain immutable after publication.
 export type Row = Record<string, any>;

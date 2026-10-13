@@ -53,6 +53,8 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   vi.stubEnv("NODE_ENV", "test");
+  vi.stubEnv("PAYMENTS_SANDBOX_INSTANCE", "");
+  run("DELETE FROM billing_instance");
   vi.stubEnv("BILLING_PROVIDER", "dodo");
   vi.stubEnv("DODO_PAYMENTS_API_KEY", "test-only-key");
   vi.stubEnv("DODO_PAYMENTS_WEBHOOK_KEY", secret);
@@ -612,4 +614,19 @@ test("live-mode configuration uses the live API and creates production entitleme
       c.body.orderId,
     )!.environment,
   ).toBe("live_mode");
+});
+test("an initialized hosted sandbox verifies test payments with production runtime security", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  vi.stubEnv("PAYMENTS_SANDBOX_INSTANCE", "1");
+  run("INSERT INTO billing_instance VALUES (1,'sandbox')");
+  const oid = await checkout(),
+    p = paymentFor(oid);
+  await event(p);
+  await processWebhooks();
+  expect(one("SELECT status FROM orders WHERE id=?", oid)!.status).toBe("paid");
+  expect(
+    (await call("/api/billing/local-confirm", { orderId: oid })).status,
+  ).toBe(404);
+  vi.stubEnv("DODO_PAYMENTS_ENVIRONMENT", "live_mode");
+  expect((await agent.get("/api/session")).body.billingEnabled).toBe(false);
 });
