@@ -26,6 +26,7 @@ jobs:
       - name: Verify live products, endpoint subscriptions and signing key
         env:
           APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+          DODO_WEBHOOK_ORIGIN: ${{ vars.DODO_LIVE_WEBHOOK_ORIGIN }}
           DODO_PAYMENTS_ENVIRONMENT: live_mode
           DODO_PAYMENTS_API_KEY: ${{ secrets.DODO_LIVE_API_KEY }}
           DODO_PAYMENTS_WEBHOOK_KEY: ${{ secrets.DODO_LIVE_WEBHOOK_KEY }}

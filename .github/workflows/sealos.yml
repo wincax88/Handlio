@@ -115,6 +115,7 @@ jobs:
     env:
       SEALOS_NAMESPACE: ${{ vars.SEALOS_NAMESPACE }}
       SEALOS_TLS_SECRET: ${{ vars.SEALOS_TLS_SECRET }}
+      SEALOS_INGRESS_ORIGIN: ${{ vars.SEALOS_INGRESS_ORIGIN }}
       APP_ORIGIN: ${{ vars.APP_ORIGIN }}
       DEPLOY_IMAGE: ${{ needs.image.outputs.reference }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
@@ -138,6 +139,7 @@ jobs:
       BILLING_WEBHOOK_SECRET: ${{ secrets.BILLING_WEBHOOK_SECRET }}
       BILLING_PROVIDER: ${{ vars.BILLING_PROVIDER }}
       DODO_PAYMENTS_ENVIRONMENT: ${{ vars.DODO_PAYMENTS_ENVIRONMENT }}
+      DODO_WEBHOOK_ORIGIN: ${{ vars.DODO_LIVE_WEBHOOK_ORIGIN }}
       # Production must never fall back to the existing test credentials.
       DODO_PAYMENTS_API_KEY: ${{ secrets.DODO_LIVE_API_KEY }}
       DODO_PAYMENTS_WEBHOOK_KEY: ${{ secrets.DODO_LIVE_WEBHOOK_KEY }}

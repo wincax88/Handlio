@@ -63,6 +63,25 @@ Pod 模板的发布标记包含 GitHub Run ID 和 Run Attempt。更新 Secrets �
 
 平台域名和证书来自 `https://applaunchpad.cloud.sealos.io/api/platform/getClientAppConfig`。首次上线必须实际验证域名、证书、PVC 挂载权限、验证码邮件和登录，不以清单模拟校验代替线上验证。切换自定义域名时，同时更新 `APP_ORIGIN`、TLS Secret 和 DNS。
 
+## www.handlio.cloud 自定义域名
+
+DNSPod 中添加 `www` 的 CNAME，目标为 `handlio-fd5llv5c.cloud.sealos.io`，默认线路、TTL 600；现有邮件记录保持原值。此方案使用 www 子域名，不要求根域名的 CNAME 展平。
+
+`deploy/sealos/handlio-www.yaml` 定义独立的 `handlio-www` Ingress / Certificate 和命名空间内的 `handlio-public-issuer`。cert-manager 使用 Let's Encrypt HTTP-01 为 www 域名签发并续期证书；私钥由集群生成和保管。原 `handlio` Ingress 与平台通配符证书保留，用于现有正式支付回调。两个入口指向同一个生产 Service，不创建新数据库或应用副本。
+
+初次切换先在 `ns-fd5llv5c` 应用该清单，等待 `certificate/handlio-www` Ready 并验证 www 的 HTTPS，再配置 GitHub Variables：
+
+| Variable | 值 |
+| --- | --- |
+| `APP_ORIGIN` | `https://www.handlio.cloud` |
+| `SEALOS_INGRESS_ORIGIN` | `https://handlio-fd5llv5c.cloud.sealos.io` |
+| `SEALOS_TLS_SECRET` | `wildcard-cloud-sealos-io-cert` |
+| `DODO_LIVE_WEBHOOK_ORIGIN` | `https://handlio-fd5llv5c.cloud.sealos.io` |
+
+重新发布后，验证码链接、分享链接和结账回跳使用 `APP_ORIGIN`。正式 Dodo 后台的已验证端点继续使用平台地址；上线检查分别核对网站和回调地址的 production 身份，再向注册端点发送签名空事件。新域名需要重新登录。
+
+生产发布会持续应用 www 域名清单；`SEALOS_INGRESS_ORIGIN` 控制原平台 Ingress 的主机名，`SEALOS_TLS_SECRET` 继续指向平台证书。隔离测试部署不包含此清单，也不读取这两个生产域名的独立配置。不要把 www 的证书替换到测试入口。
+
 ## 操作和恢复
 
 ```sh

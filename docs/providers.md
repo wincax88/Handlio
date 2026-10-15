@@ -80,7 +80,9 @@ gh workflow run dodo-sandbox.yml --repo wincax88/Handlio
 | `DODO_LIVE_PROJECT_PRODUCT_ID` | $19 项目包商品 ID |
 | `DODO_LIVE_RENEWAL_PRODUCT_ID` | $9 / 90 天续期商品 ID |
 
-先在 Dodo 左下角切换 **Live Mode**，把两个测试商品复制到正式模式，或重新创建。正式商品需要固定一次性 USD 19 / 9，税务类别为 SaaS，无折扣、PWYW、PPP 或本地化定价。API Key、商品和 Webhook 都必须来自正式模式。在 Live Mode 注册 `https://handlio-fd5llv5c.cloud.sealos.io/api/webhooks/dodo`，订阅 payment、refund 和 dispute 组；最低事件要求为 `payment.succeeded`、`payment.failed`、`refund.succeeded`、`dispute.opened`、`dispute.won`、`dispute.lost`、`dispute.cancelled`。若之后更换域名，使用已完成 DNS 和 TLS 绑定的 `APP_ORIGIN`。
+先在 Dodo 左下角切换 **Live Mode**，把两个测试商品复制到正式模式，或重新创建。正式商品需要固定一次性 USD 19 / 9，税务类别为 SaaS，无折扣、PWYW、PPP 或本地化定价。API Key、商品和 Webhook 都必须来自正式模式。在 Live Mode 注册 `https://handlio-fd5llv5c.cloud.sealos.io/api/webhooks/dodo`，订阅 payment、refund 和 dispute 组；最低事件要求为 `payment.succeeded`、`payment.failed`、`refund.succeeded`、`dispute.opened`、`dispute.won`、`dispute.lost`、`dispute.cancelled`。
+
+网站切换到 `https://www.handlio.cloud` 后，现有正式回调继续使用平台地址，通过 GitHub Variable `DODO_LIVE_WEBHOOK_ORIGIN` 固定；不需要修改 Dodo 后台端点或替换签名密钥。校验脚本同时核对 `APP_ORIGIN` 与独立回调 Origin 的支付环境；未指定独立 Origin 时仍默认使用 `APP_ORIGIN`。结账回跳始终使用网站的 `APP_ORIGIN`。域名与证书部署见 [Sealos 自定义域名](sealos.md#wwwhandliocloud-自定义域名)。
 
 1. 保持收款关闭，先运行 `dodo-live-check.yml`，选择 `stage=preflight`。它只读取正式商品、端点订阅和签名密钥并核对服务器的 production 身份；不创建结账或付款，也不发送支付事件。
 2. 预检成功且商户已获准收款后，设置 GitHub **Variables**：`BILLING_PROVIDER=dodo`、`DODO_PAYMENTS_ENVIRONMENT=live_mode`，运行 `sealos.yml` 部署。正式工作流只读取上述 `DODO_LIVE_*` Secrets，绝不回退到测试凭据；部署前再次预检，失败时不修改集群。

@@ -16,6 +16,9 @@ const registrySecretName = sandbox
 const namespace = env.SEALOS_NAMESPACE;
 const image = env.DEPLOY_IMAGE;
 const origin = new URL(env.APP_ORIGIN || "https://invalid.local");
+const ingressOrigin = new URL(env.SEALOS_INGRESS_ORIGIN || origin.origin);
+if (sandbox && ingressOrigin.origin !== origin.origin)
+  throw new Error("The sandbox ingress must match its own application origin.");
 if (
   sandbox &&
   (!env.PRODUCTION_APP_ORIGIN ||
@@ -26,18 +29,22 @@ if (
   );
 if (!namespace || !/^[a-z0-9-]+$/.test(namespace))
   throw new Error("SEALOS_NAMESPACE is required.");
-if (
-  origin.protocol !== "https:" ||
-  origin.pathname !== "/" ||
-  origin.search ||
-  origin.hash ||
-  origin.username ||
-  origin.password ||
-  origin.hostname === "invalid.local"
-) {
-  throw new Error(
-    "APP_ORIGIN must be an HTTPS origin without a path or credentials.",
-  );
+for (const [name, value] of [
+  ["APP_ORIGIN", origin],
+  ["SEALOS_INGRESS_ORIGIN", ingressOrigin],
+]) {
+  if (
+    value.protocol !== "https:" ||
+    value.pathname !== "/" ||
+    value.search ||
+    value.hash ||
+    value.username ||
+    value.password ||
+    value.hostname === "invalid.local"
+  )
+    throw new Error(
+      `${name} must be an HTTPS origin without a path or credentials.`,
+    );
 }
 if (!image || !/^ghcr\.io\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/.test(image))
   throw new Error("A GHCR image digest is required.");
@@ -249,13 +256,29 @@ try {
     path.join(root, "deploy/sealos/resources.yaml"),
     path.join(work, "resources.yaml"),
   );
+  const resources = ["resources.yaml"];
+  if (!sandbox) {
+    copyFileSync(
+      path.join(root, "deploy/sealos/handlio-www.yaml"),
+      path.join(work, "handlio-www.yaml"),
+    );
+    resources.push("handlio-www.yaml");
+  }
   const [newName, digest] = image.split("@");
   const patches = [
     {
       target: { kind: "Ingress", name: "handlio" },
       patch: JSON.stringify([
-        { op: "replace", path: "/spec/rules/0/host", value: origin.hostname },
-        { op: "replace", path: "/spec/tls/0/hosts/0", value: origin.hostname },
+        {
+          op: "replace",
+          path: "/spec/rules/0/host",
+          value: ingressOrigin.hostname,
+        },
+        {
+          op: "replace",
+          path: "/spec/tls/0/hosts/0",
+          value: ingressOrigin.hostname,
+        },
         {
           op: "replace",
           path: "/spec/tls/0/secretName",
@@ -366,7 +389,7 @@ try {
             },
           }
         : {}),
-      resources: ["resources.yaml"],
+      resources,
       images: [{ name: "ghcr.io/wincax88/handlio", newName, digest }],
       patches,
     }),

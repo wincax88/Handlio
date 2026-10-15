@@ -1,0 +1,58 @@
+# Production custom domain. The platform ingress remains available for payment callbacks.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: handlio-public-issuer
+spec:
+  acme:
+    email: support@handlio.cloud
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: handlio-acme-account
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: handlio-www
+spec:
+  secretName: handlio-www-tls
+  dnsNames:
+    - www.handlio.cloud
+  issuerRef:
+    name: handlio-public-issuer
+    kind: Issuer
+  privateKey:
+    rotationPolicy: Always
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: handlio-www
+  labels:
+    app.kubernetes.io/part-of: handlio
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: HTTP
+    nginx.ingress.kubernetes.io/proxy-body-size: 20m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  rules:
+    - host: www.handlio.cloud
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: handlio
+                port:
+                  number: 3001
+  tls:
+    - hosts: [www.handlio.cloud]
+      secretName: handlio-www-tls

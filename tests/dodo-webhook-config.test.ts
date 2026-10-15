@@ -188,6 +188,63 @@ test("verifies signed delivery to the explicitly selected live origin", async ()
     expect.objectContaining({ method: "POST" }),
   );
 });
+test("checks the new website and existing callback origin before signing only to the registered endpoint", async () => {
+  const http = requester("production");
+  await expect(
+    verifyDodoWebhook(client([liveEndpoint()]), secret, http, {
+      origin: "https://www.handlio.example.com",
+      webhookOrigin: liveOrigin,
+      environment: "production",
+    }),
+  ).resolves.toMatchObject({ signedRequestStatus: 200 });
+  expect(http).toHaveBeenCalledWith(
+    "https://www.handlio.example.com/api/session",
+    expect.anything(),
+  );
+  expect(http).toHaveBeenCalledWith(
+    `${liveOrigin}/api/session`,
+    expect.anything(),
+  );
+  expect(http).toHaveBeenLastCalledWith(
+    liveEndpoint().url,
+    expect.objectContaining({ method: "POST" }),
+  );
+});
+test("rejects a callback origin in a different payment environment before sending a signature", async () => {
+  const http = vi.fn(
+    async (url: string) =>
+      new Response(
+        JSON.stringify({
+          paymentEnvironment: url.startsWith(liveOrigin)
+            ? "sandbox"
+            : "production",
+          billingEnabled: true,
+          localMode: false,
+        }),
+      ),
+  ) as unknown as typeof fetch;
+  await expect(
+    verifyDodoWebhook(client([liveEndpoint()]), secret, http, {
+      origin: "https://www.handlio.example.com",
+      webhookOrigin: liveOrigin,
+      environment: "production",
+    }),
+  ).rejects.toThrow("hosted production");
+  expect(http).toHaveBeenCalledTimes(2);
+});
+test("rejects insecure callback origin before using endpoint credentials", async () => {
+  const sdk = client([liveEndpoint()]),
+    http = requester("production");
+  await expect(
+    verifyDodoWebhook(sdk, secret, http, {
+      origin: liveOrigin,
+      webhookOrigin: "http://handlio.example.com",
+      environment: "production",
+    }),
+  ).rejects.toThrow("HTTPS origin");
+  expect(sdk.webhooks.retrieveSecret).not.toHaveBeenCalled();
+  expect(http).not.toHaveBeenCalled();
+});
 test("refuses sandbox targets even during live preflight", async () => {
   const http = requester("sandbox");
   await expect(

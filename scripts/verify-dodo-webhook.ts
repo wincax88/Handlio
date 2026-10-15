@@ -33,26 +33,30 @@ export async function verifyDodoWebhook(
   request: typeof fetch = fetch,
   options: {
     origin?: string;
+    webhookOrigin?: string;
     environment?: "sandbox" | "production";
     preflight?: boolean;
   } = {},
 ) {
   const origin = new URL(options.origin || new URL(testWebhookUrl).origin);
-  if (
-    origin.protocol !== "https:" ||
-    origin.username ||
-    origin.password ||
-    origin.pathname !== "/" ||
-    origin.search ||
-    origin.hash
-  )
-    throw new Error(
-      "Webhook verification requires an HTTPS origin without a path or credentials.",
-    );
+  const webhookOrigin = new URL(options.webhookOrigin || origin.origin);
+  for (const value of [origin, webhookOrigin]) {
+    if (
+      value.protocol !== "https:" ||
+      value.username ||
+      value.password ||
+      value.pathname !== "/" ||
+      value.search ||
+      value.hash
+    )
+      throw new Error(
+        "Webhook verification requires an HTTPS origin without a path or credentials.",
+      );
+  }
   const environment = options.environment || "sandbox";
   if (environment === "production" && !options.origin)
     throw new Error("Production verification requires an explicit APP_ORIGIN.");
-  const webhookUrl = `${origin.origin}/api/webhooks/dodo`;
+  const webhookUrl = `${webhookOrigin.origin}/api/webhooks/dodo`;
   if (!configuredSecret || signingBytes(configuredSecret).length === 0)
     throw new Error("Missing or invalid DODO_PAYMENTS_WEBHOOK_KEY.");
   let found = false,
@@ -87,20 +91,22 @@ export async function verifyDodoWebhook(
     : [];
   if (missing.length)
     throw new Error(`Missing webhook subscriptions: ${missing.join(", ")}`);
-  const sessionResponse = await request(`${origin.origin}/api/session`, {
-    signal: AbortSignal.timeout(15000),
-    redirect: "error",
-  });
-  const session = await sessionResponse.json();
-  if (
-    !sessionResponse.ok ||
-    session.paymentEnvironment !== environment ||
-    (!options.preflight && session.billingEnabled !== true) ||
-    session.localMode !== false
-  )
-    throw new Error(
-      `The target must be the authenticated hosted ${environment} instance${options.preflight ? "" : " with billing enabled"}.`,
-    );
+  for (const target of new Set([origin.origin, webhookOrigin.origin])) {
+    const sessionResponse = await request(`${target}/api/session`, {
+      signal: AbortSignal.timeout(15000),
+      redirect: "error",
+    });
+    const session = await sessionResponse.json();
+    if (
+      !sessionResponse.ok ||
+      session.paymentEnvironment !== environment ||
+      (!options.preflight && session.billingEnabled !== true) ||
+      session.localMode !== false
+    )
+      throw new Error(
+        `The target must be the authenticated hosted ${environment} instance${options.preflight ? "" : " with billing enabled"}.`,
+      );
+  }
   if (options.preflight)
     return {
       endpointEnabled: true,
@@ -171,6 +177,7 @@ if (
           fetch,
           {
             origin: process.env.APP_ORIGIN,
+            webhookOrigin: process.env.DODO_WEBHOOK_ORIGIN,
             environment: mode === "live_mode" ? "production" : "sandbox",
             preflight: process.env.DODO_WEBHOOK_PREFLIGHT === "1",
           },
