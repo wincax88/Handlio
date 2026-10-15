@@ -129,6 +129,7 @@ test("social preview has a real PNG image with the advertised dimensions", async
     .get("/social-card.png")
     .expect(200)
     .expect("Content-Type", /png/);
+  expect(res.headers["x-robots-tag"]).toBeUndefined();
   expect(res.body.readUInt32BE(16)).toBe(1200);
   expect(res.body.readUInt32BE(20)).toBe(630);
 });

@@ -40,7 +40,11 @@ export function installSeo(
       throw new Error(`Missing prerendered page: ${route}. Run npm run build.`);
 
   app.use((req, res, next) => {
-    if (!allowIndexing || !isPublicPath(req.path))
+    if (
+      !allowIndexing ||
+      isPrivatePath(req.path) ||
+      req.path.startsWith("/samples/")
+    )
       res.setHeader("X-Robots-Tag", "noindex, nofollow");
     next();
   });
@@ -80,6 +84,7 @@ export function installSeo(
       return res.redirect(308, `${normalized}${query}`);
     }
     const publicPage = isPublicPath(req.path);
+    if (!publicPage) res.setHeader("X-Robots-Tag", "noindex, nofollow");
     const known = publicPage || isPrivatePath(req.path);
     const prerendered = publicPage
       ? pages[req.path]
