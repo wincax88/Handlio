@@ -1,0 +1,30 @@
+.source-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 20px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+.source-footer a {
+  color: var(--ink);
+  padding-block: 6px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.app-shell + .source-footer {
+  margin-left: 218px;
+}
+@media (max-width: 1200px) {
+  .app-shell + .source-footer {
+    margin-left: 205px;
+  }
+}
+@media (max-width: 760px) {
+  .app-shell + .source-footer {
+    margin-left: 0;
+  }
+}

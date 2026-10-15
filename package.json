@@ -2,6 +2,7 @@
   "name": "handlio",
   "version": "0.1.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "engines": {
     "node": ">=22.13.0"

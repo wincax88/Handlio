@@ -4,7 +4,7 @@ Turn screenshots into clear client handover manuals.
 
 Handlio helps freelancers, agencies, and software implementation teams document what they deliver. Create illustrated guides, publish a version, invite clients to review it, and collect explicit acknowledgement of that exact release. Deliver the result through a private reader, a PDF, or an offline HTML package.
 
-**[Open Handlio](https://www.handlio.cloud)** · [Quick start](#quick-start) · [Documentation](#documentation)
+**[Open Handlio](https://www.handlio.cloud)** · [Quick start](#quick-start) · [Documentation](#documentation) · [License](#license)
 
 The interface is in English. Guide content supports Unicode, including Chinese.
 
@@ -127,6 +127,16 @@ docs/            Architecture, API, integration, and acceptance references
 ```
 
 Image decoding and PDF rendering use separate processes with resource limits. Published snapshots are protected by database immutability rules. Client assets and downloads are authorized on each request; downloaded copies cannot be recalled. SQLite and file-backed jobs currently use a single application instance with a persistent volume.
+
+## License
+
+Copyright (C) 2026 Handlio contributors.
+
+Handlio is free software licensed under the **GNU Affero General Public License, version 3 only** (`AGPL-3.0-only`). You may use, modify, and redistribute it under the terms in [LICENSE](LICENSE). This grant does not include later versions of the license. Third-party dependencies and materials retain their respective licenses.
+
+If you modify Handlio and make it available over a network, AGPL section 13 requires you to prominently offer the corresponding source of your version to users interacting with it. The hosted app provides source and license links in its footer. Container builds use `SOURCE_REPOSITORY` and `SOURCE_REVISION` to identify the source of the deployed version; modified deployments must point these at their own corresponding source. The GitHub Actions build sets them automatically from the repository and commit.
+
+The software is provided without warranty, to the extent permitted by law. See [LICENSE](LICENSE) for the complete terms.
 
 ## Documentation
 

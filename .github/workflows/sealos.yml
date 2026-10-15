@@ -68,10 +68,14 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
+          build-args: |
+            SOURCE_REPOSITORY=https://github.com/${{ github.repository }}
+            SOURCE_REVISION=${{ github.sha }}
           tags: ${{ steps.name.outputs.image }}:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - id: reference
@@ -94,10 +98,15 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:3001/api/health
           curl --fail --silent http://127.0.0.1:3001/ | grep -q '<div id="root"'
-          docker exec handlio-smoke node --input-type=module -e '
+          docker exec -e EXPECTED_SOURCE_URL="https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA" handlio-smoke node --input-type=module -e '
             import { chromium } from "playwright";
+            import { readFile } from "node:fs/promises";
             const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE_PATH });
             const page = await browser.newPage();
+            await page.goto("http://127.0.0.1:3001");
+            const source = await page.getByRole("contentinfo", { name: "Handlio source and license" }).getByRole("link", { name: "Source code", exact: true }).getAttribute("href");
+            if (source !== process.env.EXPECTED_SOURCE_URL) throw new Error("Source link must identify the deployed revision");
+            if (!(await readFile("/app/LICENSE", "utf8")).includes("GNU AFFERO GENERAL PUBLIC LICENSE")) throw new Error("Missing image license");
             await page.setContent("<h1>Handlio 中文操作手册</h1>");
             const pdf = await page.pdf({ format: "A4" });
             if (pdf.length < 1000) throw new Error("Empty PDF");
