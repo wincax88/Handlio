@@ -42,7 +42,7 @@ jobs:
       GHCR_USERNAME: ${{ github.repository_owner }}
       GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
       BILLING_PROVIDER: dodo
-      PAYMENTS_SANDBOX_INSTANCE: '1'
+      PAYMENTS_SANDBOX_INSTANCE: "1"
       DODO_PAYMENTS_ENVIRONMENT: test_mode
       DODO_PAYMENTS_API_KEY: ${{ secrets.DODO_PAYMENTS_API_KEY }}
       DODO_PAYMENTS_WEBHOOK_KEY: ${{ secrets.DODO_PAYMENTS_WEBHOOK_KEY }}
@@ -52,11 +52,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
       - run: npm ci
       - name: Verify test-mode API and fixed product prices without charging
-        run: node scripts/verify-dodo.mjs
+        run: node --import tsx scripts/verify-dodo-catalog.ts
       - name: Resolve the image for this tested revision
         env:
           GH_TOKEN: ${{ github.token }}

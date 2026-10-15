@@ -119,3 +119,106 @@ test("accepts an endpoint subscribed to all events and normalizes the optional t
     ),
   ).resolves.toMatchObject({ signingKeyMatches: true });
 });
+
+const liveOrigin = "https://handlio.example.com";
+const liveEndpoint = () => ({
+  ...endpoint(),
+  url: `${liveOrigin}/api/webhooks/dodo`,
+});
+test("does not send live signed delivery until production billing is enabled", async () => {
+  const http = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          paymentEnvironment: "production",
+          billingEnabled: false,
+          localMode: false,
+        }),
+      ),
+  ) as unknown as typeof fetch;
+  await expect(
+    verifyDodoWebhook(client([liveEndpoint()]), secret, http, {
+      origin: liveOrigin,
+      environment: "production",
+    }),
+  ).rejects.toThrow("billing enabled");
+  expect(http).toHaveBeenCalledTimes(1);
+});
+test("preflights live configuration while billing is disabled without posting any event", async () => {
+  const http = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          paymentEnvironment: "production",
+          billingEnabled: false,
+          localMode: false,
+        }),
+      ),
+  ) as unknown as typeof fetch;
+  const result = await verifyDodoWebhook(
+    client([liveEndpoint()]),
+    secret,
+    http,
+    {
+      origin: liveOrigin,
+      environment: "production",
+      preflight: true,
+    },
+  );
+  expect(result).toMatchObject({
+    signingKeyMatches: true,
+    signedRequestStatus: null,
+  });
+  expect(http).toHaveBeenCalledTimes(1);
+  expect(http).toHaveBeenCalledWith(
+    `${liveOrigin}/api/session`,
+    expect.not.objectContaining({ method: "POST" }),
+  );
+});
+test("verifies signed delivery to the explicitly selected live origin", async () => {
+  const http = requester("production");
+  await expect(
+    verifyDodoWebhook(client([liveEndpoint()]), secret, http, {
+      origin: liveOrigin,
+      environment: "production",
+    }),
+  ).resolves.toMatchObject({ signedRequestStatus: 200 });
+  expect(http).toHaveBeenLastCalledWith(
+    liveEndpoint().url,
+    expect.objectContaining({ method: "POST" }),
+  );
+});
+test("refuses sandbox targets even during live preflight", async () => {
+  const http = requester("sandbox");
+  await expect(
+    verifyDodoWebhook(client([liveEndpoint()]), secret, http, {
+      origin: liveOrigin,
+      environment: "production",
+      preflight: true,
+    }),
+  ).rejects.toThrow("hosted production");
+  expect(http).toHaveBeenCalledTimes(1);
+});
+test("live verification cannot silently default to the sandbox origin", async () => {
+  const sdk = client([endpoint()]),
+    http = requester();
+  await expect(
+    verifyDodoWebhook(sdk, secret, http, {
+      environment: "production",
+    }),
+  ).rejects.toThrow("explicit APP_ORIGIN");
+  expect(http).not.toHaveBeenCalled();
+});
+test.each([
+  "http://handlio.example.com",
+  "https://handlio.example.com/path",
+  "https://user:password@handlio.example.com",
+])("rejects unsafe origin %s before using credentials", async (origin) => {
+  const sdk = client([endpoint()]),
+    http = requester();
+  await expect(
+    verifyDodoWebhook(sdk, secret, http, { origin }),
+  ).rejects.toThrow("HTTPS origin");
+  expect(sdk.webhooks.retrieveSecret).not.toHaveBeenCalled();
+  expect(http).not.toHaveBeenCalled();
+});

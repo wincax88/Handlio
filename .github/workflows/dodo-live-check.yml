@@ -1,0 +1,37 @@
+name: Verify Dodo live configuration without creating a payment
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Preflight before enabling billing, or signed delivery after deployment
+        type: choice
+        options: [preflight, delivery]
+        default: preflight
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: sealos
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Verify live products, endpoint subscriptions and signing key
+        env:
+          APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+          DODO_PAYMENTS_ENVIRONMENT: live_mode
+          DODO_PAYMENTS_API_KEY: ${{ secrets.DODO_LIVE_API_KEY }}
+          DODO_PAYMENTS_WEBHOOK_KEY: ${{ secrets.DODO_LIVE_WEBHOOK_KEY }}
+          DODO_PROJECT_PRODUCT_ID: ${{ secrets.DODO_LIVE_PROJECT_PRODUCT_ID }}
+          DODO_RENEWAL_PRODUCT_ID: ${{ secrets.DODO_LIVE_RENEWAL_PRODUCT_ID }}
+          DODO_WEBHOOK_PREFLIGHT: ${{ inputs.stage == 'preflight' && '1' || '0' }}
+        run: |
+          node --import tsx scripts/verify-dodo-catalog.ts
+          node --import tsx scripts/verify-dodo-webhook.ts

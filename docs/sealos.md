@@ -45,6 +45,8 @@ GHCR 首次发布的包默认是私有的。使用公开镜像时，需要将该
 
 支付与 AI 可选参数延续 `.env.example`：URL / 告知放 Variables，Token / Webhook Secret 放 Secrets。无真实适配器时，相应商业服务不可用；公网不会开放开发支付确认接口或显示开发验证码。
 
+Dodo 正式收款使用独立 Secrets：`DODO_LIVE_API_KEY`、`DODO_LIVE_WEBHOOK_KEY`、`DODO_LIVE_PROJECT_PRODUCT_ID`、`DODO_LIVE_RENEWAL_PRODUCT_ID`。现有无 LIVE 前缀的 Dodo Secrets 继续供隔离测试实例使用。正式工作流不会回退读取测试密钥；仅在 `BILLING_PROVIDER=dodo` 和 `DODO_PAYMENTS_ENVIRONMENT=live_mode` 启用。先运行 `dodo-live-check.yml` 的 `preflight`，成功后设置这两个 Variables 并重新发布；部署前会再次检查商品与端点，部署后验证签名回调。完整步骤见 [Dodo 正式启用](providers.md#测试验收及正式启用)。
+
 非支付增强配置：`BACKUP_KEY` 放 Secret，`BACKUP_DIRECTORY` 放 Variable，二者共同启用每日加密备份；目录应挂载独立私有存储，默认清单不会创建异地存储。`AI_MAX_STEP_COST_USD`、`AI_DAILY_BUDGET_USD` 控制美元成本上限。`OPERATOR_NAME` 默认为 Handlio Team，`OPERATOR_REGION` 默认为 Mainland China；`DATA_HOSTING_REGION` 仅填写已确认的数据地区。
 
 缺少生产必需参数时，部署脚本会在修改集群应用前失败并给出参数名称。kubeconfig、运行时 Secret 和镜像拉取 Secret 均不进入 Git 或 Docker 构建上下文。临时文件采用私有权限，任务结束清理。不要把 kubeconfig 或 SMTP 密码放入 Issue、PR、普通 Variable 或日志。

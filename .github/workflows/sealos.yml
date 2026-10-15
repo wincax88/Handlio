@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium firefox webkit
@@ -138,10 +138,11 @@ jobs:
       BILLING_WEBHOOK_SECRET: ${{ secrets.BILLING_WEBHOOK_SECRET }}
       BILLING_PROVIDER: ${{ vars.BILLING_PROVIDER }}
       DODO_PAYMENTS_ENVIRONMENT: ${{ vars.DODO_PAYMENTS_ENVIRONMENT }}
-      DODO_PAYMENTS_API_KEY: ${{ secrets.DODO_PAYMENTS_API_KEY }}
-      DODO_PAYMENTS_WEBHOOK_KEY: ${{ secrets.DODO_PAYMENTS_WEBHOOK_KEY }}
-      DODO_PROJECT_PRODUCT_ID: ${{ vars.DODO_PROJECT_PRODUCT_ID || secrets.DODO_PROJECT_PRODUCT_ID }}
-      DODO_RENEWAL_PRODUCT_ID: ${{ vars.DODO_RENEWAL_PRODUCT_ID || secrets.DODO_RENEWAL_PRODUCT_ID }}
+      # Production must never fall back to the existing test credentials.
+      DODO_PAYMENTS_API_KEY: ${{ secrets.DODO_LIVE_API_KEY }}
+      DODO_PAYMENTS_WEBHOOK_KEY: ${{ secrets.DODO_LIVE_WEBHOOK_KEY }}
+      DODO_PROJECT_PRODUCT_ID: ${{ secrets.DODO_LIVE_PROJECT_PRODUCT_ID }}
+      DODO_RENEWAL_PRODUCT_ID: ${{ secrets.DODO_LIVE_RENEWAL_PRODUCT_ID }}
       AI_ADAPTER_URL: ${{ vars.AI_ADAPTER_URL }}
       AI_ADAPTER_TOKEN: ${{ secrets.AI_ADAPTER_TOKEN }}
       AI_PRIVACY_NOTICE: ${{ vars.AI_PRIVACY_NOTICE }}
@@ -156,7 +157,18 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '24'
+          node-version: "24"
+      - name: Install payment verification dependencies
+        if: env.BILLING_PROVIDER == 'dodo'
+        run: npm ci
+      - name: Verify live catalog and webhook configuration before changing the cluster
+        if: env.BILLING_PROVIDER == 'dodo'
+        env:
+          DODO_WEBHOOK_PREFLIGHT: "1"
+        run: |
+          test "$DODO_PAYMENTS_ENVIRONMENT" = live_mode
+          node --import tsx scripts/verify-dodo-catalog.ts
+          node --import tsx scripts/verify-dodo-webhook.ts
       - name: Install kubectl matching the cluster minor version
         env:
           VERSION: v1.28.15
@@ -178,6 +190,14 @@ jobs:
         run: node scripts/verify-resend.mjs
       - name: Apply persistent resources and verify HTTPS
         run: node scripts/deploy-sealos.mjs
+      - name: Verify live signed delivery and reject unsigned callbacks
+        if: env.BILLING_PROVIDER == 'dodo'
+        run: |
+          node --import tsx scripts/verify-dodo-webhook.ts
+          node --input-type=module -e '
+            const response = await fetch(process.env.APP_ORIGIN + "/api/webhooks/dodo", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", redirect: "error", signal: AbortSignal.timeout(15000) });
+            if (response.status !== 401) throw new Error("Unsigned callback must be rejected");
+          '
       - name: Remove temporary credential
         if: always()
         run: rm -f "$RUNNER_TEMP/handlio-kubeconfig"

@@ -71,7 +71,33 @@ gh workflow run dodo-sandbox.yml --repo wincax88/Handlio
 
 配置完成后，使用 Dodo 官方测试卡完成项目购买和续期，确认回跳、签名回调、订单状态、税额、发票及截止日期；再在 Test Mode 执行退款和争议测试。观察 `/app/ops` 中 webhook 的 processed / retry / dead 状态。自动测试使用官方 SDK 加模拟 HTTPS API，覆盖验签、去重、租户隔离、金额、退款、争议、失败、过期链接和环境隔离；它不替代真实账户验收。
 
-正式启用时，在 Live Mode 创建对应商品、申请有效正式 Key 和回调签名密钥。GitHub repository / sealos environment 的 **Variables** 配置 `BILLING_PROVIDER=dodo`、`DODO_PAYMENTS_ENVIRONMENT=live_mode`、`DODO_PROJECT_PRODUCT_ID`、`DODO_RENEWAL_PRODUCT_ID`；**Secrets** 配置 `DODO_PAYMENTS_API_KEY`、`DODO_PAYMENTS_WEBHOOK_KEY`。工作流会传入运行时 Secret。在 Live Mode 注册 `https://handlio-fd5llv5c.cloud.sealos.io/api/webhooks/dodo`。上线前完成商户开通和账户验收。测试与正式实例分别维护订单数据库，不能在已有测试数据目录上直接切模式。
+正式启用使用独立的四个 GitHub Secrets（repository 或 `sealos` Environment），保留现有测试配置：
+
+| GitHub Secret | Dodo Live Mode 配置 |
+| --- | --- |
+| `DODO_LIVE_API_KEY` | 正式 API Key |
+| `DODO_LIVE_WEBHOOK_KEY` | 正式端点的 Signing secret |
+| `DODO_LIVE_PROJECT_PRODUCT_ID` | $19 项目包商品 ID |
+| `DODO_LIVE_RENEWAL_PRODUCT_ID` | $9 / 90 天续期商品 ID |
+
+先在 Dodo 左下角切换 **Live Mode**，把两个测试商品复制到正式模式，或重新创建。正式商品需要固定一次性 USD 19 / 9，税务类别为 SaaS，无折扣、PWYW、PPP 或本地化定价。API Key、商品和 Webhook 都必须来自正式模式。在 Live Mode 注册 `https://handlio-fd5llv5c.cloud.sealos.io/api/webhooks/dodo`，订阅 payment、refund 和 dispute 组；最低事件要求为 `payment.succeeded`、`payment.failed`、`refund.succeeded`、`dispute.opened`、`dispute.won`、`dispute.lost`、`dispute.cancelled`。若之后更换域名，使用已完成 DNS 和 TLS 绑定的 `APP_ORIGIN`。
+
+1. 保持收款关闭，先运行 `dodo-live-check.yml`，选择 `stage=preflight`。它只读取正式商品、端点订阅和签名密钥并核对服务器的 production 身份；不创建结账或付款，也不发送支付事件。
+2. 预检成功且商户已获准收款后，设置 GitHub **Variables**：`BILLING_PROVIDER=dodo`、`DODO_PAYMENTS_ENVIRONMENT=live_mode`，运行 `sealos.yml` 部署。正式工作流只读取上述 `DODO_LIVE_*` Secrets，绝不回退到测试凭据；部署前再次预检，失败时不修改集群。
+3. 部署后工作流核对 production 支付能力，并发出带签名的 `handlio.verification` 空事件验证 HTTP 200，确认未签名回调被拒绝。该事件被业务处理器忽略，不进入支付队列、不改变订单或权益。也可单独运行 `dodo-live-check.yml` 的 `stage=delivery` 复核。
+4. 完成真实收款验收，检查购买、续期、回跳、异步订单状态、税额及发票；有签名的空事件验证不代表真实付款验收已完成。截图中的 Dodo 品牌与 $0 付款引导项需要在正式后台完成；不通过修改业务商品价格或绕过金额校验来勾选完成。
+
+```sh
+gh workflow run dodo-live-check.yml --repo wincax88/Handlio --ref main -f stage=preflight
+# 预检成功后启用，并部署
+gh variable set BILLING_PROVIDER --body dodo --repo wincax88/Handlio
+gh variable set DODO_PAYMENTS_ENVIRONMENT --body live_mode --repo wincax88/Handlio
+gh workflow run sealos.yml --repo wincax88/Handlio --ref main
+```
+
+上线前完成商户开通和账户验收。测试与正式实例分别维护订单数据库，不能在已有测试数据目录上直接切模式。需要临时停止新增结账时，清空 `BILLING_PROVIDER` 和 `DODO_PAYMENTS_ENVIRONMENT` 后重新部署会关闭 Dodo 接入，也会暂停回调处理；应先核对在途订单，恢复后通过订单对账处理遗漏状态。不要更改或删除持久卷。
+
+官方说明：[测试与正式模式](https://docs.dodopayments.com/miscellaneous/test-mode-vs-live-mode)。
 
 官方参考：[Checkout Sessions](https://docs.dodopayments.com/developer-resources/checkout-session)、[Webhook 验签](https://docs.dodopayments.com/developer-resources/webhooks)、[集成指南](https://docs.dodopayments.com/developer-resources/integration-guide)。
 

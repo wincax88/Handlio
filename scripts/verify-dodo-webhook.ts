@@ -31,7 +31,28 @@ export async function verifyDodoWebhook(
   sdk: Pick<DodoPayments, "webhooks">,
   configuredSecret: string,
   request: typeof fetch = fetch,
+  options: {
+    origin?: string;
+    environment?: "sandbox" | "production";
+    preflight?: boolean;
+  } = {},
 ) {
+  const origin = new URL(options.origin || new URL(testWebhookUrl).origin);
+  if (
+    origin.protocol !== "https:" ||
+    origin.username ||
+    origin.password ||
+    origin.pathname !== "/" ||
+    origin.search ||
+    origin.hash
+  )
+    throw new Error(
+      "Webhook verification requires an HTTPS origin without a path or credentials.",
+    );
+  const environment = options.environment || "sandbox";
+  if (environment === "production" && !options.origin)
+    throw new Error("Production verification requires an explicit APP_ORIGIN.");
+  const webhookUrl = `${origin.origin}/api/webhooks/dodo`;
   if (!configuredSecret || signingBytes(configuredSecret).length === 0)
     throw new Error("Missing or invalid DODO_PAYMENTS_WEBHOOK_KEY.");
   let found = false,
@@ -41,7 +62,7 @@ export async function verifyDodoWebhook(
   let scanned = 0;
   for await (const endpoint of sdk.webhooks.list()) {
     if (++scanned > 100) throw new Error("Endpoint search limit exceeded.");
-    if (endpoint.url.replace(/\/$/, "") !== testWebhookUrl) continue;
+    if (endpoint.url.replace(/\/$/, "") !== webhookUrl) continue;
     found = true;
     if (endpoint.disabled) continue;
     active = true;
@@ -53,9 +74,9 @@ export async function verifyDodoWebhook(
   }
   if (!found)
     throw new Error(
-      "No Dodo TEST MODE endpoint matches the Sealos test webhook URL.",
+      `No Dodo ${environment === "sandbox" ? "TEST MODE" : "LIVE MODE"} endpoint matches the configured webhook URL.`,
     );
-  if (!active) throw new Error("The Dodo test webhook endpoint is disabled.");
+  if (!active) throw new Error("The Dodo webhook endpoint is disabled.");
   if (!matching)
     throw new Error(
       "GitHub DODO_PAYMENTS_WEBHOOK_KEY does not match the current Dodo endpoint Signing secret.",
@@ -66,27 +87,34 @@ export async function verifyDodoWebhook(
     : [];
   if (missing.length)
     throw new Error(`Missing webhook subscriptions: ${missing.join(", ")}`);
-  const sessionResponse = await request(
-    "https://handlio-test-fd5llv5c.cloud.sealos.io/api/session",
-    { signal: AbortSignal.timeout(15000), redirect: "error" },
-  );
+  const sessionResponse = await request(`${origin.origin}/api/session`, {
+    signal: AbortSignal.timeout(15000),
+    redirect: "error",
+  });
   const session = await sessionResponse.json();
   if (
     !sessionResponse.ok ||
-    session.paymentEnvironment !== "sandbox" ||
-    !session.billingEnabled ||
-    session.localMode
+    session.paymentEnvironment !== environment ||
+    (!options.preflight && session.billingEnabled !== true) ||
+    session.localMode !== false
   )
     throw new Error(
-      "The target must be the authenticated hosted sandbox instance.",
+      `The target must be the authenticated hosted ${environment} instance${options.preflight ? "" : " with billing enabled"}.`,
     );
+  if (options.preflight)
+    return {
+      endpointEnabled: true,
+      subscriptionsVerified: true,
+      signingKeyMatches: true,
+      signedRequestStatus: null,
+    };
 
   // This verified but deliberately unrelated event is ignored by the billing handler.
   // It does not enter the payment queue, create a checkout, or change an order/grant.
   const timestamp = String(Math.floor(Date.now() / 1000));
   const eventId = `handlio-config-check-${randomUUID()}`;
   const body = JSON.stringify({
-    business_id: "handlio-test-verification",
+    business_id: "handlio-configuration-verification",
     type: "handlio.verification",
     timestamp: new Date().toISOString(),
     data: {},
@@ -94,7 +122,7 @@ export async function verifyDodoWebhook(
   const signature = createHmac("sha256", signingBytes(configuredSecret))
     .update(`${eventId}.${timestamp}.${body}`)
     .digest("base64");
-  const response = await request(testWebhookUrl, {
+  const response = await request(webhookUrl, {
     method: "POST",
     redirect: "error",
     signal: AbortSignal.timeout(15000),
@@ -109,7 +137,7 @@ export async function verifyDodoWebhook(
   const result = await response.json();
   if (response.status !== 200 || result.received !== true)
     throw new Error(
-      "Signed webhook verification failed. Refresh the sandbox deployment after updating the Signing secret.",
+      `Signed webhook verification failed. Refresh the ${environment === "sandbox" ? "sandbox" : "production"} deployment after updating the Signing secret.`,
     );
   return {
     endpointEnabled: true,
@@ -123,31 +151,42 @@ if (
   process.argv[1] &&
   fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
 ) {
-  if (process.env.DODO_PAYMENTS_ENVIRONMENT !== "test_mode")
-    throw new Error("Verification is restricted to Dodo test_mode.");
-  const sdk = new DodoPayments({
-    bearerToken: process.env.DODO_PAYMENTS_API_KEY,
-    environment: "test_mode",
-    timeout: 15000,
-    maxRetries: 0,
-  });
   try {
+    const mode = process.env.DODO_PAYMENTS_ENVIRONMENT;
+    if (mode !== "test_mode" && mode !== "live_mode")
+      throw new Error("Explicit Dodo test_mode or live_mode is required.");
+    if (!process.env.DODO_PAYMENTS_API_KEY)
+      throw new Error("Missing DODO_PAYMENTS_API_KEY.");
+    const sdk = new DodoPayments({
+      bearerToken: process.env.DODO_PAYMENTS_API_KEY,
+      environment: mode,
+      timeout: 15000,
+      maxRetries: 0,
+    });
     console.log(
       JSON.stringify(
         await verifyDodoWebhook(
           sdk,
           process.env.DODO_PAYMENTS_WEBHOOK_KEY || "",
+          fetch,
+          {
+            origin: process.env.APP_ORIGIN,
+            environment: mode === "live_mode" ? "production" : "sandbox",
+            preflight: process.env.DODO_WEBHOOK_PREFLIGHT === "1",
+          },
         ),
       ),
     );
     console.log(
-      "Dodo endpoint configuration and real signed delivery verified. No payment state was changed.",
+      process.env.DODO_WEBHOOK_PREFLIGHT === "1"
+        ? "Dodo endpoint configuration verified before deployment. Signed delivery remains to be checked after deployment."
+        : "Dodo endpoint configuration and real signed delivery verified. No payment state was changed.",
     );
   } catch (error) {
     console.error(
       error instanceof Error && error.constructor === Error
         ? error.message
-        : "Dodo API verification unavailable. Check Test Mode API permissions and connectivity.",
+        : "Dodo API verification unavailable. Check the selected mode, API permissions and connectivity.",
     );
     process.exitCode = 1;
   }
