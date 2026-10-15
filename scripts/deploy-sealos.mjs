@@ -336,7 +336,7 @@ try {
       ]),
     });
   }
-  // A changed runtime secret must restart the pod even if the image is unchanged.
+  // Re-running a job keeps its run ID; include the attempt so changed secrets reload.
   patches.push({
     target: { kind: "Deployment", name: "handlio" },
     patch: JSON.stringify([
@@ -344,7 +344,9 @@ try {
         op: "add",
         path: "/spec/template/metadata/annotations",
         value: {
-          "handlio.io/deployment-run": env.GITHUB_RUN_ID || `${Date.now()}`,
+          "handlio.io/deployment-run": env.GITHUB_RUN_ID
+            ? `${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT || "1"}`
+            : `${Date.now()}`,
         },
       },
     ]),
