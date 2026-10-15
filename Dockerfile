@@ -11,6 +11,7 @@ COPY src ./src
 COPY shared ./shared
 COPY server ./server
 COPY public ./public
+COPY scripts/prerender.mjs ./scripts/prerender.mjs
 COPY LICENSE ./LICENSE
 RUN npm run build && npm prune --omit=dev
 

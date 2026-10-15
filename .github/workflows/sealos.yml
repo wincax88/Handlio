@@ -103,7 +103,19 @@ jobs:
             import { readFile } from "node:fs/promises";
             const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE_PATH });
             const page = await browser.newPage();
+            const errors = [];
+            page.on("pageerror", error => errors.push(error.message));
+            for (const route of ["/", "/pricing", "/examples", "/help", "/terms", "/privacy", "/refund"]) {
+              await page.goto(`http://127.0.0.1:3001${route}`, { waitUntil: "networkidle" });
+              if (await page.locator("h1").count() !== 1) throw new Error(`Missing page content: ${route}`);
+            }
+            if (errors.length) throw new Error(`Public page hydration failed: ${errors.join(", ")}`);
             await page.goto("http://127.0.0.1:3001");
+            const raw = await (await fetch("http://127.0.0.1:3001/pricing")).text();
+            if (!raw.includes("One project. A clear handoff.") || !raw.includes("application/ld+json")) throw new Error("Public HTML must include crawlable content and structured data");
+            await page.getByRole("link", { name: "Pricing", exact: true }).click();
+            await page.waitForFunction(() => document.title.startsWith("Pricing"));
+            if (await page.locator("link[rel=canonical]").getAttribute("href") !== "https://smoke.invalid/pricing") throw new Error("Canonical must follow client navigation and runtime APP_ORIGIN");
             const source = await page.getByRole("contentinfo", { name: "Handlio source and license" }).getByRole("link", { name: "Source code", exact: true }).getAttribute("href");
             if (source !== process.env.EXPECTED_SOURCE_URL) throw new Error("Source link must identify the deployed revision");
             if (!(await readFile("/app/LICENSE", "utf8")).includes("GNU AFFERO GENERAL PUBLIC LICENSE")) throw new Error("Missing image license");

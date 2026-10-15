@@ -19,6 +19,7 @@ import { installIncidents } from "./incidents.js";
 import { installResources } from "./resources.js";
 import { installLinkChecks } from "./link-checks.js";
 import { installServiceInformation } from "./service-information.js";
+import { installSeo } from "./seo.js";
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
@@ -45,6 +46,8 @@ export function createApp() {
   app.use((req, res, next) => {
     res.locals.requestId = randomUUID();
     res.setHeader("X-Request-ID", res.locals.requestId);
+    if (req.path === "/api" || req.path.startsWith("/api/"))
+      res.setHeader("X-Robots-Tag", "noindex, nofollow");
     next();
   });
   app.use(
@@ -100,10 +103,7 @@ export function createApp() {
   );
   const dist = path.resolve("dist");
   if (existsSync(dist)) {
-    app.use(express.static(dist));
-    app.get("/{*path}", (req, res) =>
-      res.sendFile(path.join(dist, "index.html")),
-    );
+    installSeo(app, dist);
   }
   app.use(
     (

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f6f8f6"/>
+  <rect x="56" y="56" width="1088" height="518" rx="24" fill="#fff" stroke="#dce6de"/>
+  <image x="104" y="104" width="60" height="60" href="./handlio-logo.png"/>
+  <g font-family="Arial, sans-serif">
+    <text x="184" y="148" font-size="38" font-weight="700" fill="#203b38">Handlio</text>
+    <text x="104" y="270" font-size="58" font-weight="700" fill="#203b38">Clear guides.</text>
+    <text x="104" y="344" font-size="58" font-weight="700" fill="#0d7d77">Smooth handoffs.</text>
+    <text x="104" y="414" font-size="25" fill="#596e68">Turn screenshots into client-ready handbooks.</text>
+    <text x="104" y="455" font-size="25" fill="#596e68">Share privately. Export your work. Start free.</text>
+    <text x="104" y="526" font-size="20" fill="#0d7d77">www.handlio.cloud</text>
+  </g>
+</svg>

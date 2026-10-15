@@ -87,16 +87,24 @@ See the [Sealos deployment guide](docs/sealos.md), [deployment and recovery guid
 
 Operational acceptance still includes real purchase, refund, and dispute scenarios, independent backup and recovery drills, and manual review of supported devices and export layouts. Automated tests and signed callback checks do not replace those exercises.
 
+## Search and sharing
+
+The production server serves prerendered HTML for the home, pricing, examples, help, terms, privacy, and refund pages. They use the same React components as the interactive application, with route-specific titles, descriptions, canonical URLs, Open Graph and Twitter metadata, and JSON-LD. Public content remains readable without JavaScript; account-specific actions update after sign-in status loads.
+
+`APP_ORIGIN` supplies the canonical origin at runtime. Production publishes `/robots.txt` and `/sitemap.xml`; the sitemap contains only public pages. Login, workspace, operations, API, and private handbook URLs use `noindex`. The separate payment sandbox blocks indexing throughout and publishes no sitemap URLs. Unknown pages return HTTP 404, and duplicate public trailing-slash URLs redirect permanently.
+
+`npm run build` generates public HTML fragments and a 1200 × 630 social preview image. Serve the result with `npm start`; Vite's preview server does not apply Express SEO routing. Update page metadata in `shared/seo.ts`, and edit `public/social-card.svg` to change the share image. After verifying site ownership in a search engine's webmaster console, submit `https://www.handlio.cloud/sitemap.xml` there.
+
 ## Development commands
 
 | Command                      | Purpose                                                         |
 | ---------------------------- | --------------------------------------------------------------- |
 | `npm run dev`                | Start the local API and Vite development server                 |
 | `npm run check`              | Run TypeScript checks                                           |
-| `npm test`                   | Run server and configuration tests                              |
+| `npm test`                   | Run server, configuration, and SEO tests after `npm run build`  |
 | `npm run test:ui`            | Run Playwright scenarios using the default Chromium project     |
 | `npm run test:cross-browser` | Run scenarios in Chromium, Firefox, and WebKit                  |
-| `npm run build`              | Check types and build the frontend                              |
+| `npm run build`              | Check types, build the frontend, and prerender public pages     |
 | `npm start`                  | Serve the API and built frontend                                |
 | `npm run backup`             | Create an encrypted backup using the configured backup settings |
 | `npm run restore`            | Run the restore tool; follow the recovery guide before using it |

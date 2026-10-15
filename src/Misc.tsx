@@ -519,17 +519,15 @@ export function Help({
   session: Session;
   embedded?: boolean;
 }) {
-  const [kind, setKind] = useState(
-    new URLSearchParams(location.search).get("kind") === "refund"
-      ? "refund"
-      : "help",
-  );
+  const [kind, setKind] = useState("help");
   const [email, setEmail] = useState(session.user?.email || "");
-  const [body, setBody] = useState(
-    new URLSearchParams(location.search).has("order")
-      ? `Order reference: ${new URLSearchParams(location.search).get("order")}\n\n`
-      : "",
-  );
+  const [body, setBody] = useState("");
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    if (query.get("kind") === "refund") setKind("refund");
+    if (query.has("order"))
+      setBody(`Order reference: ${query.get("order")}\n\n`);
+  }, []);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [request, setRequest] = useState<any>(null);

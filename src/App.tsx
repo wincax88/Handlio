@@ -49,6 +49,8 @@ import { Reader } from "./Reader";
 import { Billing, SettingsPage, Help, Policy, Ops } from "./Misc";
 import { Onboarding } from "./Workspace";
 import { PaymentPage } from "./Payment";
+import { isPrivatePath, isPublicPath } from "../shared/seo";
+import { updatePageMetadata } from "./seo";
 const defaultSession: Session = {
   user: null,
   localMode: false,
@@ -57,8 +59,8 @@ const defaultSession: Session = {
   billingEnabled: false,
   supportEmail: "",
 };
-export function App() {
-  const [route, setRoute] = useState(location.pathname);
+export function App({ initialRoute }: { initialRoute?: string } = {}) {
+  const [route, setRoute] = useState(initialRoute || location.pathname);
   const [session, setSession] = useState<Session>(defaultSession);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +81,30 @@ export function App() {
     window.addEventListener("popstate", listener);
     return () => window.removeEventListener("popstate", listener);
   }, []);
+  useEffect(() => updatePageMetadata(route), [route]);
+  // Public content renders immediately and matches the build-time HTML. Session
+  // loading only updates account-specific actions; it never hides the page.
+  if (["/terms", "/privacy", "/refund"].includes(route))
+    return <Policy kind={route.slice(1)} session={session} />;
+  if (route === "/help") return <Help session={session} />;
+  if (route === "/pricing") return <Landing pricing session={session} />;
+  if (route === "/examples") return <Landing examples session={session} />;
+  if (route === "/") return <Landing session={session} />;
+  if (!isPublicPath(route) && !isPrivatePath(route))
+    return (
+      <div className="public-document">
+        <PageHeading
+          title="Page not found"
+          description="This page is unavailable. You can return to Handlio or visit the help center."
+        />
+        <Link to="/" className="button">
+          Back to Handlio
+        </Link>{" "}
+        <Link to="/help" className="button secondary">
+          Help center
+        </Link>
+      </div>
+    );
   if (!ready) return <Loading />;
   if (error)
     return (
@@ -102,18 +128,12 @@ export function App() {
     return <Reader publicId={publicId} session={session} />;
   }
   if (route === "/auth") return <Auth session={session} refresh={refresh} />;
-  if (["/terms", "/privacy", "/refund"].includes(route))
-    return <Policy kind={route.slice(1)} session={session} />;
-  if (route === "/help") return <Help session={session} />;
-  if (route === "/pricing") return <Landing pricing session={session} />;
-  if (route === "/examples") return <Landing examples session={session} />;
   if (route === "/ops")
     return session.user ? (
       <Ops />
     ) : (
       <Auth session={session} refresh={refresh} />
     );
-  if (!route.startsWith("/app")) return <Landing session={session} />;
   if (!session.user?.workspaceId)
     return <Auth session={session} refresh={refresh} />;
   if (!session.user.settings.onboardingComplete || route === "/app/onboarding")
@@ -569,8 +589,9 @@ function Landing({
                   <br />a <em>clear handoff.</em>
                 </h1>
                 <p className="lead">
-                  Turn your screenshots into a client-ready handbook. Share
-                  privately, answer questions, and confirm the exact version.
+                  Turn screenshots into client-ready handbooks for website and
+                  software handoffs. Share privately, answer questions, and
+                  confirm the exact version.
                 </p>
                 <div className="hero-actions">
                   <Link to={target} className="button large">
@@ -624,8 +645,8 @@ function Landing({
                 <div>
                   <h3>Made for client work</h3>
                   <p>
-                    Private invitations. Separate projects. No anonymous public
-                    links.
+                    For independent developers, implementation consultants and
+                    small studios. Private invitations and separate projects.
                   </p>
                 </div>
               </article>
