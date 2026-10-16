@@ -167,6 +167,8 @@ jobs:
       DODO_PROJECT_PRODUCT_ID: ${{ secrets.DODO_LIVE_PROJECT_PRODUCT_ID }}
       DODO_RENEWAL_PRODUCT_ID: ${{ secrets.DODO_LIVE_RENEWAL_PRODUCT_ID }}
       AI_ADAPTER_URL: ${{ vars.AI_ADAPTER_URL }}
+      AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       AI_ADAPTER_TOKEN: ${{ secrets.AI_ADAPTER_TOKEN }}
       AI_PRIVACY_NOTICE: ${{ vars.AI_PRIVACY_NOTICE }}
       AI_MAX_STEP_COST_USD: ${{ vars.AI_MAX_STEP_COST_USD }}
@@ -181,9 +183,14 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-      - name: Install payment verification dependencies
-        if: env.BILLING_PROVIDER == 'dodo'
+      - name: Install provider verification dependencies
+        if: env.BILLING_PROVIDER == 'dodo' || env.DEEPSEEK_API_KEY != '' || env.AI_PROVIDER == 'deepseek'
         run: npm ci
+      - name: Verify DeepSeek with a fictional screenshot
+        if: env.DEEPSEEK_API_KEY != '' || env.AI_PROVIDER == 'deepseek'
+        env:
+          NODE_ENV: test
+        run: node --import tsx scripts/verify-deepseek.ts
       - name: Verify live catalog and webhook configuration before changing the cluster
         if: env.BILLING_PROVIDER == 'dodo'
         env:

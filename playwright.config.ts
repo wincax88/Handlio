@@ -38,6 +38,8 @@ export default defineConfig({
       BILLING_PROVIDER: "",
       DODO_PAYMENTS_API_KEY: "",
       AI_ADAPTER_URL: "",
+      AI_PROVIDER: "",
+      DEEPSEEK_API_KEY: "",
       DATA_DIR: `.work/e2e-data/run-${Date.now()}`,
       PORT: "3011",
       HANDLIO_API_PROXY: "http://127.0.0.1:3011",

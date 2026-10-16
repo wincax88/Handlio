@@ -113,6 +113,117 @@ async function readyProject(page: Page, existingProjectId?: string) {
     orderId: order.orderId,
   };
 }
+test("DeepSeek suggestions require consent and stay pending review after acceptance", async ({
+  page,
+}) => {
+  await signIn(page);
+  const project = await readyProject(page);
+  const session = (await (await page.request.get("/api/session")).json()).user;
+  const sharp = (await import("sharp")).default;
+  const image = await sharp({
+    create: { width: 64, height: 32, channels: 3, background: "white" },
+  })
+    .png()
+    .toBuffer();
+  const uploaded = await page.request.post(
+    `/api/projects/${project.id}/assets`,
+    {
+      headers: {
+        "X-CSRF-Token": session.csrf,
+        "Idempotency-Key": crypto.randomUUID(),
+        "X-Sanitized": "true",
+        "Content-Type": "image/png",
+      },
+      data: image,
+    },
+  );
+  expect(uploaded.ok()).toBe(true);
+  const current = await project.get();
+  current.draft.guides[0].steps[0].assetId = (await uploaded.json()).id;
+  current.draft.guides[0].steps[0].textOnly = false;
+  await project.call(
+    `/projects/${project.id}/draft`,
+    { draft: current.draft, baseRevision: current.revision },
+    "PATCH",
+  );
+  await page.route("**/api/session", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      json: {
+        ...(await response.json()),
+        aiEnabled: true,
+        aiProvider: "deepseek",
+        aiNotice: "Selected screenshots are sent to DeepSeek.",
+      },
+    });
+  });
+  await page.route(`**/api/projects/${project.id}/ai-jobs`, async (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({
+      stepIds: ["step-preview"],
+      consent: true,
+    });
+    await route.fulfill({
+      status: 202,
+      json: { jobId: "fictional-deepseek-ui-job" },
+    });
+  });
+  await page.route("**/api/jobs/fictional-deepseek-ui-job", (route) =>
+    route.fulfill({
+      json: {
+        state: "succeeded",
+        output: {
+          suggestions: [
+            {
+              sourceStepId: "step-preview",
+              title: "Inspect the preview",
+              body: "Open Preview and check the page.",
+              expected: "Review the displayed page.",
+              missing: ["Saving is not shown in this screenshot."],
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.goto(`/app/projects/${project.id}/guides`);
+  await expect(
+    page.getByRole("heading", { name: "Draft with DeepSeek" }),
+  ).toBeVisible();
+  const generate = page.getByRole("button", {
+    name: "Generate suggestion",
+    exact: true,
+  });
+  await expect(generate).toBeDisabled();
+  await page
+    .getByRole("checkbox", {
+      name: /I agree to send this processed screenshot/,
+    })
+    .check();
+  await generate.click();
+  await expect(
+    page.getByText("Needs review: Saving is not shown in this screenshot."),
+  ).toBeVisible();
+  expect((await project.get()).draft.guides[0].steps[0].title).toBe(
+    "Preview before publishing",
+  );
+  await page
+    .getByRole("button", { name: "Accept for review", exact: true })
+    .click();
+  await expect(
+    page.getByRole("textbox", { name: "Step title", exact: true }),
+  ).toHaveValue("Inspect the preview");
+  await expect(
+    page.getByRole("checkbox", { name: /I’ve checked this step/ }),
+  ).not.toBeChecked();
+  await expect
+    .poll(async () => (await project.get()).draft.guides[0].steps[0].aiPending)
+    .toBe(true);
+  await page.getByRole("checkbox", { name: /I’ve checked this step/ }).check();
+  await expect
+    .poll(async () => (await project.get()).draft.guides[0].steps[0].aiPending)
+    .toBe(false);
+});
+
 test("project language, time zone and fixed chapter titles and order persist in exact releases", async ({
   page,
   browserName,

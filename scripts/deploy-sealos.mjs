@@ -218,6 +218,8 @@ try {
     "DODO_PROJECT_PRODUCT_ID",
     "DODO_RENEWAL_PRODUCT_ID",
     "AI_ADAPTER_URL",
+    "AI_PROVIDER",
+    "DEEPSEEK_API_KEY",
     "AI_ADAPTER_TOKEN",
     "AI_PRIVACY_NOTICE",
     "AI_MAX_STEP_COST_USD",
@@ -231,6 +233,7 @@ try {
     if (
       sandbox &&
       (key.startsWith("AI_") ||
+        key.startsWith("DEEPSEEK_") ||
         key.startsWith("BACKUP_") ||
         key.startsWith("BILLING_ADAPTER") ||
         key === "BILLING_WEBHOOK_SECRET")

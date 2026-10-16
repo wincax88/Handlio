@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { aiConfiguration } from "./ai.js";
 export function installServiceInformation(app: Express) {
   app.get("/api/service-information", (_req, res) =>
     res.json({
@@ -7,9 +8,10 @@ export function installServiceInformation(app: Express) {
       hostingRegion: process.env.DATA_HOSTING_REGION || "Pending confirmation",
       supportEmail: process.env.SUPPORT_EMAIL || "support@handlio.cloud",
       emailProvider: process.env.MAIL_PROVIDER || "Not disclosed",
-      aiConfigured: !!process.env.AI_ADAPTER_URL,
+      aiConfigured: aiConfiguration().enabled,
+      aiProvider: aiConfiguration().provider || "Not configured",
       aiPrivacyNotice:
-        process.env.AI_PRIVACY_NOTICE || "AI processing is not enabled.",
+        aiConfiguration().notice || "AI processing is not enabled.",
       retention: {
         verificationMinutes: 10,
         sessionHours: 12,

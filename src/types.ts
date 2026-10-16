@@ -42,6 +42,7 @@ export type Session = {
   };
   localMode: boolean;
   aiEnabled: boolean;
+  aiProvider?: string;
   aiNotice: string;
   billingEnabled: boolean;
   paymentEnvironment?: "production" | "sandbox";

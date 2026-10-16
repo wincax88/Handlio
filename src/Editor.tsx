@@ -110,8 +110,28 @@ export function Editor({
           setAi(result.output);
           return;
         }
-        if (["failed", "canceled"].includes(result.state))
-          throw new Error(result.error || "AI task failed.");
+        if (["failed", "canceled"].includes(result.state)) {
+          const messages: Record<string, string> = {
+            AI_PROVIDER_AUTH:
+              "AI is temporarily unavailable because its provider credentials need attention.",
+            AI_PROVIDER_BALANCE:
+              "AI is temporarily unavailable because its provider balance needs attention.",
+            PROVIDER_UNAVAILABLE:
+              "The AI provider is unavailable. Try again later.",
+            AI_SCHEMA_INVALID:
+              "The AI suggestion was incomplete or invalid. Your draft has not changed. Try again or write this step manually.",
+            AI_BUDGET_EXCEEDED:
+              "The AI cost limit is too low for this request. Review the project budget or write this step manually.",
+            AI_INPUT_TOO_LARGE:
+              "This screenshot is too large for AI. Use a smaller image or write this step manually.",
+            JOB_CANCELED:
+              "The AI task was canceled. Your draft has not changed.",
+          };
+          throw new Error(
+            messages[result.error] ||
+              "The AI task failed. Your draft has not changed. Try again or write this step manually.",
+          );
+        }
       }
       throw new Error(
         "The task is taking longer than expected. Check its status in the project.",
@@ -755,7 +775,10 @@ export function Editor({
             <div className="ai-section">
               <div>
                 <Sparkles size={17} />
-                <h3>Draft with AI</h3>
+                <h3>
+                  Draft with{" "}
+                  {session.aiProvider === "deepseek" ? "DeepSeek" : "AI"}
+                </h3>
                 <Badge>Optional</Badge>
               </div>
               <p>

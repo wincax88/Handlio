@@ -25,6 +25,7 @@ import { localMode, origin, sendMail } from "./providers.js";
 import { billingAvailable } from "./dodo.js";
 import { expectedPaymentEnvironment } from "./payment-instance.js";
 import { deviceRiskGate, recordDeviceFailure } from "./device-risk.js";
+import { aiConfiguration } from "./ai.js";
 const secret =
   process.env.SESSION_SECRET || "local-only-development-session-secret-32";
 const digest = (code: string, email: string, purpose: string, scope: string) =>
@@ -298,8 +299,9 @@ export function installAuth(app: Express) {
           }
         : null,
       localMode,
-      aiEnabled: !!process.env.AI_ADAPTER_URL,
-      aiNotice: process.env.AI_PRIVACY_NOTICE || "",
+      aiEnabled: aiConfiguration().enabled,
+      aiProvider: aiConfiguration().provider,
+      aiNotice: aiConfiguration().notice,
       billingEnabled: billingAvailable(),
       paymentEnvironment: expectedPaymentEnvironment(),
       supportEmail: process.env.SUPPORT_EMAIL || "support@example.com",
