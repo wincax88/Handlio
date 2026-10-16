@@ -30,7 +30,7 @@ export default defineConfig({
   webServer: {
     command:
       'npx concurrently -k "tsx watch server/index.ts" "vite --host 127.0.0.1 --port 5183 --strictPort"',
-    url: "http://localhost:5183",
+    url: "http://localhost:5183/api/health",
     reuseExistingServer: false,
     env: {
       MAIL_PROVIDER: "local",

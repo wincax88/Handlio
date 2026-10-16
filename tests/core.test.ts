@@ -731,7 +731,7 @@ describe("Exports, revocation, expiry and deletion", () => {
     );
     expect(buffer.subarray(0, 4).toString()).toBe("%PDF");
     expect(generated.pages).toBeGreaterThanOrEqual(3);
-    expect(generated.tocEntries).toBe(3);
+    expect(generated.tocEntries).toBe(4);
     mkdirSync(".work", { recursive: true });
     writeFileSync(".work/qa-handbook.pdf", buffer);
   });

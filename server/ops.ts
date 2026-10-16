@@ -5,6 +5,7 @@ import { AppError, audit, many, requireValue, one, run } from "./db.js";
 import { fresh } from "./domain.js";
 import { retryJob } from "./jobs.js";
 import { reconcileOrder } from "./billing.js";
+import { retryWebhook, webhookMetadata } from "./billing-recovery.js";
 export const isOps = (email: string) =>
   (process.env.OPS_EMAILS || "")
     .split(",")
@@ -20,6 +21,28 @@ function operator(req: Request, res: Response, next: NextFunction) {
   next();
 }
 export function installOps(app: Express) {
+  app.get("/api/ops/webhooks/:id", authenticated, operator, (req, res) => {
+    const event = webhookMetadata(String(req.params.id));
+    audit(res.locals.user.id, null, "ops_webhook_inspected", {
+      webhookId: event.id,
+    });
+    res.json(event);
+  });
+  app.post(
+    "/api/ops/webhooks/:id/retry",
+    authenticated,
+    operator,
+    (req, res) => {
+      const b = z
+        .object({ reason: z.string().trim().min(5).max(500) })
+        .parse(req.body);
+      res
+        .status(202)
+        .json(
+          retryWebhook(String(req.params.id), res.locals.user.id, b.reason),
+        );
+    },
+  );
   app.get("/api/ops/jobs/:id", authenticated, operator, (req, res) => {
     const job = requireValue(
       one(
@@ -82,7 +105,7 @@ export function installOps(app: Express) {
         "SELECT name AS id,last_success_at,last_error_at,error_code FROM worker_state",
       ),
       alerts: many(
-        "SELECT name AS id,error_code,last_error_at FROM worker_state WHERE error_code IS NOT NULL AND COALESCE(last_error_at,0)>=COALESCE(last_success_at,0) UNION ALL SELECT project_id AS id,reason AS error_code,NULL AS last_error_at FROM ai_controls WHERE paused=1",
+        "SELECT name AS id,error_code,last_error_at FROM worker_state WHERE error_code IS NOT NULL AND COALESCE(last_error_at,0)>=COALESCE(last_success_at,0) UNION ALL SELECT project_id AS id,reason AS error_code,NULL AS last_error_at FROM ai_controls WHERE paused=1 UNION ALL SELECT id,'PAYMENT_WEBHOOK_DEAD',created_at FROM webhooks WHERE status='dead' UNION ALL SELECT r.order_id,r.error_code,r.checked_at FROM billing_reconciliations r JOIN orders o ON o.id=r.order_id WHERE r.state='failed' AND o.status='pending'",
       ),
       jobs: many(
         "SELECT id,project_id,type,state,error,attempts,created_at FROM jobs ORDER BY created_at DESC LIMIT 100",
@@ -92,6 +115,9 @@ export function installOps(app: Express) {
       ),
       webhooks: many(
         "SELECT id,status,attempts,created_at FROM webhooks ORDER BY created_at DESC LIMIT 100",
+      ),
+      reconciliations: many(
+        "SELECT r.order_id AS id,r.state,r.error_code,r.checked_at AS created_at,r.next_at,o.status AS order_status FROM billing_reconciliations r JOIN orders o ON o.id=r.order_id ORDER BY r.checked_at DESC LIMIT 100",
       ),
       notifications: many(
         "SELECT id,state,attempts,created_at FROM notifications ORDER BY created_at DESC LIMIT 100",

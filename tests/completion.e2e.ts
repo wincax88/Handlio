@@ -25,7 +25,7 @@ async function signIn(
     page.getByRole("heading", { name: "Your next handoff, made clear." }),
   ).toBeVisible();
 }
-async function readyProject(page: Page) {
+async function readyProject(page: Page, existingProjectId?: string) {
   const session = (await (await page.request.get("/api/session")).json()).user;
   async function call(url: string, data: any, method = "POST") {
     const response = await page.request.fetch(`/api${url}`, {
@@ -39,12 +39,14 @@ async function readyProject(page: Page) {
     expect(response.ok(), await response.text()).toBe(true);
     return response.json();
   }
-  const created = await call("/projects", {
-    name: "Northstar completion",
-    clientName: "Northstar Studio",
-    title: "Northstar operations",
-    template: "blank",
-  });
+  const created = existingProjectId
+    ? { id: existingProjectId }
+    : await call("/projects", {
+        name: "Northstar completion",
+        clientName: "Northstar Studio",
+        title: "Northstar operations",
+        template: "blank",
+      });
   const get = async () =>
     (await page.request.get(`/api/projects/${created.id}`)).json();
   let project = await get();
@@ -111,6 +113,142 @@ async function readyProject(page: Page) {
     orderId: order.orderId,
   };
 }
+test("project language, time zone and fixed chapter titles and order persist in exact releases", async ({
+  page,
+  browserName,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error" && message.text().includes("same key"))
+      errors.push(message.text());
+  });
+  await signIn(page);
+  await page.goto("/app/projects/new");
+  await expect(
+    page.getByLabel("Project time zone", { exact: true }),
+  ).toHaveValue("Asia/Shanghai");
+  await page
+    .getByLabel("Project name", { exact: true })
+    .fill("Locale chapters");
+  await page
+    .getByLabel("Client name", { exact: true })
+    .fill("Fictional client");
+  await page.getByRole("button", { name: /A blank canvas/ }).click();
+  await page
+    .getByLabel("Project content language", { exact: true })
+    .fill("zh-CN");
+  await page
+    .getByLabel("Project time zone", { exact: true })
+    .fill("America/New_York");
+  await page
+    .getByRole("button", { name: "Create project", exact: true })
+    .click();
+  await expect(page).not.toHaveURL(/\/app\/projects\/new$/);
+  await expect(page).toHaveURL(/\/app\/projects\/[^/]+$/);
+  const id = new URL(page.url()).pathname.split("/").pop()!;
+  const project = await readyProject(page, id);
+  const original = project.release;
+  await page.goto(`/app/projects/${id}/handbook`);
+  await page
+    .getByLabel("Project time zone", { exact: true })
+    .fill("Invalid/Zone");
+  await page
+    .getByRole("button", { name: "Apply language & time zone", exact: true })
+    .click();
+  await expect(
+    page.getByText(
+      "Enter a valid language tag and time zone before applying.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await page.getByLabel("Project content language", { exact: true }).fill("fr");
+  await page
+    .getByLabel("Project time zone", { exact: true })
+    .fill("Europe/Paris");
+  await page
+    .getByRole("button", { name: "Apply language & time zone", exact: true })
+    .click();
+  for (const [label, title] of [
+    ["Rename Project overview", "Project context"],
+    ["Rename Handoff checklist", "Delivery checklist"],
+    ["Rename Support & maintenance", "Help & care"],
+  ]) {
+    await page.getByRole("textbox", { name: label, exact: true }).fill(title);
+    await page
+      .getByRole("textbox", { name: label, exact: true })
+      .press("Enter");
+  }
+  for (let i = 0; i < 2; i++)
+    await page
+      .getByRole("button", { name: "Move Help & care up", exact: true })
+      .click();
+  for (let i = 0; i < 2; i++)
+    await page
+      .getByRole("button", { name: "Move Project context down", exact: true })
+      .click();
+  const expected = [
+    "support",
+    `guide:${original.snapshot.guides[0].id}`,
+    "overview",
+    "checklist",
+  ];
+  await expect
+    .poll(async () => (await project.get()).draft.sectionOrder)
+    .toEqual(expected);
+  expect((await project.get()).currentRelease.hash).toBe(original.hash);
+  expect((await project.get()).currentRelease.snapshot.timezone).toBe(
+    "America/New_York",
+  );
+  await page.reload();
+  await expect(
+    page.getByLabel("Project time zone", { exact: true }),
+  ).toHaveValue("Europe/Paris");
+  await expect(
+    page.getByRole("textbox", { name: "Rename Project overview", exact: true }),
+  ).toHaveValue("Project context");
+  await page.screenshot({
+    path: `.work/screenshots/project-chapters-${browserName}.png`,
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(page.locator(".manual")).toHaveAttribute("lang", "fr");
+  await expect(page.locator(".manual-guide h2")).toHaveText([
+    "Help & care",
+    "Update content",
+    "Project context",
+    "Delivery checklist",
+  ]);
+  const released = await project.publish(
+    "Updated project language and chapters",
+  );
+  const p = await project.get();
+  await page.goto(`/h/${p.publicId}`);
+  await expect(page.locator(".manual")).toHaveAttribute("lang", "fr");
+  await expect(page.locator(".reader-outline nav a")).toHaveText([
+    "Help & care",
+    "01Update content",
+    "Project context",
+    "Delivery checklist",
+  ]);
+  expect(released.snapshot.sectionOrder).toEqual(expected);
+  await page.setViewportSize({ width: 360, height: 800 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.goto(`/h/${p.publicId}?release=${original.id}`);
+  await expect(page.locator(".manual")).toHaveAttribute("lang", "zh-CN");
+  await expect(page.locator(".manual-guide h2")).toHaveText([
+    "Project overview",
+    "Update content",
+    "Handoff checklist",
+    "Support & maintenance",
+  ]);
+  expect(errors).toEqual([]);
+});
+
 test("public examples, onboarding, account preferences and temporary support authorization", async ({
   page,
 }) => {
@@ -417,4 +555,71 @@ test("operations inspects only metadata or explicit samples and audits provider 
       .filter({ hasText: grant.id })
       .getByRole("button", { name: "Review authorized scope" }),
   ).toBeDisabled();
+
+  // Exercise the repair UI with metadata fixtures. Authorization, durable
+  // queuing and provider verification are covered by the server tests.
+  const webhook = {
+    id: `dodo:test_mode:repair-${browserName}`,
+    status: "dead",
+    attempts: 5,
+    total_attempts: 5,
+    created_at: Date.now(),
+    retry_available_at: null as number | null,
+  };
+  let repairReason = "";
+  await page.route("**/api/ops", async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    data.webhooks.push(webhook);
+    await route.fulfill({ response, json: data });
+  });
+  await page.route(`**/api/ops/webhooks/${webhook.id}`, async (route) => {
+    await route.fulfill({ json: webhook });
+  });
+  await page.route(`**/api/ops/webhooks/${webhook.id}/retry`, async (route) => {
+    repairReason = route.request().postDataJSON().reason;
+    webhook.status = "queued";
+    webhook.attempts = 0;
+    webhook.retry_available_at = Date.now() + 15 * 60000;
+    await route.fulfill({ status: 202, json: webhook });
+  });
+  await page.getByRole("button", { name: "Refresh status" }).click();
+  const webhooks = page.locator(".panel").filter({
+    has: page.getByRole("heading", { name: "webhooks", exact: true }),
+  });
+  await webhooks
+    .locator(".request-row")
+    .filter({ hasText: webhook.id })
+    .getByRole("button", { name: "Inspect", exact: true })
+    .click();
+  const retry = page.getByRole("button", {
+    name: "Retry payment event",
+    exact: true,
+  });
+  await expect(retry).toBeDisabled();
+  await page
+    .getByLabel("Reason for repair")
+    .fill("Provider recovered after a verified outage.");
+  await expect(retry).toBeEnabled();
+  await retry.click();
+  await expect(
+    page.getByText(
+      "Payment event queued for provider verification. Entitlements change only after verification succeeds.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  expect(repairReason).toBe("Provider recovered after a verified outage.");
+  await webhooks
+    .locator(".request-row")
+    .filter({ hasText: webhook.id })
+    .getByRole("button", { name: "Inspect", exact: true })
+    .click();
+  await page
+    .getByLabel("Reason for repair")
+    .fill("Do not queue the same event twice.");
+  await expect(retry).toBeDisabled();
+  await page.screenshot({
+    path: ".work/screenshots/payment-webhook-repair.png",
+    fullPage: true,
+  });
 });

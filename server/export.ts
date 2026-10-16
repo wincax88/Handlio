@@ -4,7 +4,8 @@ import { createWriteStream, existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { dataDir, requireValue, one, AppError, type Row } from "./db.js";
-import type { Draft } from "../shared/model.js";
+import type { Draft, Guide } from "../shared/model.js";
+import { handbookSections, projectDate } from "../shared/handbook.js";
 import {
   PDFDocument,
   PDFArray,
@@ -54,8 +55,23 @@ export async function renderHtml(r: Row, inline = false, paper = "A4") {
         : `assets/${aid}.png`,
     );
   }
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${escapeHtml(d.title)}</title><style>
-  @page{size:${paper === "Letter" ? "Letter" : "A4"};margin:18mm 16mm}*{box-sizing:border-box}body{font:16px/1.7 'Segoe UI','Microsoft YaHei',sans-serif;color:#182b34;background:#f8f9f6;margin:0}main{max-width:900px;margin:auto;padding:40px 26px}h1{font-size:40px;line-height:1.15}h2{font-size:28px;border-top:1px solid #dce2dc;padding-top:22px}h3{font-size:20px}a{color:${d.color}}p,li{overflow-wrap:anywhere}img{display:block;max-width:100%;max-height:230mm;object-fit:contain;margin:16px 0}header{padding:32px 0 40px;border-bottom:2px solid ${d.color}}.meta{font-size:12px;color:#52655d;overflow-wrap:anywhere}.step{margin:26px 0}.result{font-size:14px}.checklist{padding-left:24px}nav a{display:block;margin:8px 0}@media print{body{background:white;font-size:10pt}main{padding:0}header{break-after:page}h2,h3{break-after:avoid}img{break-inside:avoid}nav{break-after:page}.step{margin:16px 0}}</style></head><body><main><header>${d.logoId ? `<img src="${images.get(d.logoId)}" alt="Brand logo" style="max-width:160px;max-height:70px">` : ""}<p>${escapeHtml(d.clientName)} · CLIENT HANDBOOK</p><h1>${escapeHtml(d.title)}</h1><p>${text(d.intro)}</p><p class="meta">Version v${r.version} · Published ${new Date(r.created_at).toISOString()}<br>Manifest SHA-256 ${r.hash}<br>Generated ${new Date().toISOString()}</p></header><nav><h2>Contents</h2>${d.guides.map((g, i) => `<a href="#guide-${i}">${i + 1}. ${escapeHtml(g.title)}</a>`).join("")}<a href="#handoff">Handoff checklist</a><a href="#support">Support & maintenance</a></nav><section><h2>Project overview</h2><p>${text(d.intro)}</p><p>${escapeHtml(d.projectName)} · ${escapeHtml(d.clientName)}</p></section>${d.guides.map((g, i) => `<section id="guide-${i}"><h2>${i + 1}. ${escapeHtml(g.title)}</h2><p>${text(g.goal)}</p><p><b>Before you begin</b><br>${text(g.prerequisites)}</p><p><b>For</b> ${text(g.audience)}</p>${g.steps.map((s, j) => `<article class="step" id="step-${escapeHtml(s.id)}"><h3>${j + 1}. ${escapeHtml(s.title)}</h3><p>${text(s.body)}</p>${s.assetId ? `<img src="${images.get(s.assetId)}" alt="${escapeHtml(s.alt)}">` : ""}${s.expected ? `<p class="result"><b>Expected result</b><br>${text(s.expected)}</p>` : ""}${s.warning ? `<p class="result"><b>Please note</b><br>${text(s.warning)}</p>` : ""}</article>`).join("")}<p><b>Completion</b><br>${text(g.completion)}</p>${g.faq ? `<h3>Common questions</h3><p>${text(g.faq)}</p>` : ""}</section>`).join("")}<section id="handoff"><h2>Handoff checklist</h2><ul class="checklist">${d.checklist.map((c) => `<li>${c.done ? "✓" : "○"} ${escapeHtml(c.title)}${c.required ? " (required)" : ""}<br>${text(c.description)}</li>`).join("")}</ul></section><section id="support"><h2>Support & maintenance</h2><p>${text(d.maintenance)}</p>${d.supportEmail ? `<p><a href="mailto:${escapeHtml(d.supportEmail)}">${escapeHtml(d.supportEmail)}</a></p>` : ""}${d.supportUrl ? `<p><a href="${escapeHtml(d.supportUrl)}">${escapeHtml(d.supportUrl)}</a></p>` : ""}</section><footer><p class="meta">Prepared with Handlio. Receipt confirmation is a workflow record, not an electronic contract signature. This offline file cannot submit questions or confirmations; use the authenticated online handoff link.</p></footer></main></body></html>`;
+  const sections = handbookSections(d);
+  const guideHtml = (g: Guide, i: number) =>
+    `<section id="guide-${escapeHtml(g.id)}"><h2>${i + 1}. ${escapeHtml(g.title)}</h2><p>${text(g.goal)}</p><p><b>Before you begin</b><br>${text(g.prerequisites)}</p><p><b>For</b> ${text(g.audience)}</p>${g.steps.map((s, j) => `<article class="step" id="step-${escapeHtml(s.id)}"><h3>${j + 1}. ${escapeHtml(s.title)}</h3><p>${text(s.body)}</p>${s.assetId ? `<img src="${images.get(s.assetId)}" alt="${escapeHtml(s.alt)}">` : ""}${s.expected ? `<p class="result"><b>Expected result</b><br>${text(s.expected)}</p>` : ""}${s.warning ? `<p class="result"><b>Please note</b><br>${text(s.warning)}</p>` : ""}</article>`).join("")}<p><b>Completion</b><br>${text(g.completion)}</p>${g.faq ? `<h3>Common questions</h3><p>${text(g.faq)}</p>` : ""}</section>`;
+  const body = sections
+    .map((section) => {
+      if (section.kind === "guide")
+        return guideHtml(section.guide, section.number - 1);
+      const heading = `<section id="${section.anchor}"><h2>${escapeHtml(section.title)}</h2>`;
+      if (section.id === "overview")
+        return `${heading}<p>${text(d.intro)}</p><p>${escapeHtml(d.projectName)} · ${escapeHtml(d.clientName)}</p></section>`;
+      if (section.id === "checklist")
+        return `${heading}<ul class="checklist">${d.checklist.map((c) => `<li>${c.done ? "✓" : "○"} ${escapeHtml(c.title)}${c.required ? " (required)" : ""}<br>${text(c.description)}</li>`).join("")}</ul></section>`;
+      return `${heading}<p>${text(d.maintenance)}</p>${d.supportEmail ? `<p><a href="mailto:${escapeHtml(d.supportEmail)}">${escapeHtml(d.supportEmail)}</a></p>` : ""}${d.supportUrl ? `<p><a href="${escapeHtml(d.supportUrl)}">${escapeHtml(d.supportUrl)}</a></p>` : ""}</section>`;
+    })
+    .join("");
+  const html = `<!doctype html><html lang="${escapeHtml(d.language || "en")}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>${escapeHtml(d.title)}</title><style>
+  @page{size:${paper === "Letter" ? "Letter" : "A4"};margin:18mm 16mm}*{box-sizing:border-box}body{font:16px/1.7 'Segoe UI','Microsoft YaHei',sans-serif;color:#182b34;background:#f8f9f6;margin:0}main{max-width:900px;margin:auto;padding:40px 26px}h1{font-size:40px;line-height:1.15}h2{font-size:28px;border-top:1px solid #dce2dc;padding-top:22px}h3{font-size:20px}a{color:${d.color}}p,li{overflow-wrap:anywhere}img{display:block;max-width:100%;max-height:230mm;object-fit:contain;margin:16px 0}header{padding:32px 0 40px;border-bottom:2px solid ${d.color}}.meta{font-size:12px;color:#52655d;overflow-wrap:anywhere}.step{margin:26px 0}.result{font-size:14px}.checklist{padding-left:24px}nav a{display:block;margin:8px 0}@media print{body{background:white;font-size:10pt}main{padding:0}header{break-after:page}h2,h3{break-after:avoid}img{break-inside:avoid}nav{break-after:page}.step{margin:16px 0}}</style></head><body><main><header>${d.logoId ? `<img src="${images.get(d.logoId)}" alt="Brand logo" style="max-width:160px;max-height:70px">` : ""}<p>${escapeHtml(d.clientName)} · CLIENT HANDBOOK</p><h1>${escapeHtml(d.title)}</h1><p class="meta">Version v${r.version} · Published <time datetime="${new Date(r.created_at).toISOString()}">${escapeHtml(projectDate(r.created_at, d))}</time><br>Manifest SHA-256 ${r.hash}<br>Generated ${escapeHtml(projectDate(Date.now(), d))}</p></header><nav><h2>Contents</h2>${sections.map((section) => `<a href="#${escapeHtml(section.anchor)}">${section.kind === "guide" ? `${section.number}. ` : ""}${escapeHtml(section.title)}</a>`).join("")}</nav>${body}<footer><p class="meta">Prepared with Handlio. Receipt confirmation is a workflow record, not an electronic contract signature. This offline file cannot submit questions or confirmations; use the authenticated online handoff link.</p></footer></main></body></html>`;
   return { html, images };
 }
 export async function generateExport(
@@ -137,7 +153,10 @@ export async function generateExport(
         footerTemplate: `<div style="width:100%;font-size:8px;text-align:center;color:#52655d">Handlio · v${r.version} · <span class="pageNumber"></span> / <span class="totalPages"></span></div>`,
         margin: { top: "18mm", bottom: "18mm", left: "16mm", right: "16mm" },
       });
-      const numbered = await numberContents(bytes);
+      const numbered = await numberContents(
+        bytes,
+        JSON.parse(r.snapshot).language || "en",
+      );
       await writeFile(output, numbered.bytes);
       pages = numbered.pages;
       tocEntries = numbered.tocEntries;
@@ -156,7 +175,7 @@ export async function generateExport(
     tocEntries,
   };
 }
-async function numberContents(bytes: Uint8Array) {
+async function numberContents(bytes: Uint8Array, language: string) {
   const pdf = await PDFDocument.load(bytes);
   const pages = pdf.getPages();
   const references = new Map(pages.map((p, i) => [p.ref.toString(), i + 1]));
@@ -239,5 +258,6 @@ async function numberContents(bytes: Uint8Array) {
     }
   }
   pdf.setCreator("Handlio");
+  pdf.catalog.set(PDFName.of("Lang"), PDFString.of(language));
   return { bytes: await pdf.save(), pages: pages.length, tocEntries };
 }

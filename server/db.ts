@@ -53,6 +53,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_dodo_creation ON dodo_checkouts(order_id) 
 CREATE INDEX IF NOT EXISTS idx_dodo_orders ON dodo_checkouts(order_id,created_at);
 CREATE TABLE IF NOT EXISTS dodo_receipts (order_id TEXT PRIMARY KEY REFERENCES orders(id), total INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS billing_instance (singleton INTEGER PRIMARY KEY CHECK(singleton=1), kind TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS billing_reconciliations (order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE, checked_at INTEGER NOT NULL, next_at INTEGER NOT NULL, state TEXT NOT NULL, error_code TEXT);
+CREATE INDEX IF NOT EXISTS idx_orders_pending ON orders(status,created_at);
+CREATE TABLE IF NOT EXISTS webhook_retries (webhook_id TEXT PRIMARY KEY REFERENCES webhooks(id) ON DELETE CASCADE, retried_at INTEGER NOT NULL, previous_attempts INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS auth_device_risk (device_digest TEXT PRIMARY KEY, window_started_at INTEGER NOT NULL, challenges INTEGER NOT NULL, verifications INTEGER NOT NULL, failures INTEGER NOT NULL, blocked_until INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 `);
 // SQL is always parameterized. JSON snapshots remain immutable after publication.
 export type Row = Record<string, any>;

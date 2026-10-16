@@ -37,6 +37,8 @@ import {
 import { authenticated } from "./auth.js";
 import {
   createDraft,
+  languageSchema,
+  timezoneSchema,
   emailSchema,
   type Draft,
   type Role,
@@ -44,6 +46,7 @@ import {
 import { notify, origin } from "./providers.js";
 import { settingsSchema, workspaceSettings } from "../shared/workspace.js";
 import { relatedAssets } from "./annotations.js";
+import { sectionOrder } from "../shared/handbook.js";
 const param = (r: Request, key = "id") => String(r.params[key]);
 const key = (r: Request) =>
   String(r.get("idempotency-key") || r.body?.idempotencyKey || "");
@@ -97,6 +100,8 @@ export function installRoutes(app: Express) {
         clientName: z.string().trim().min(1).max(120),
         title: z.string().trim().min(1).max(160),
         template: z.enum(["website", "software", "blank"]),
+        language: languageSchema.optional(),
+        timezone: timezoneSchema.optional(),
       })
       .parse(req.body);
     const u = me(res);
@@ -120,6 +125,8 @@ export function installRoutes(app: Express) {
       const pid = id();
       const d = createDraft(b.template, b.title, id);
       const settings = JSON.parse(u.settings);
+      d.language = b.language || "en";
+      d.timezone = b.timezone || settings.timezone || "UTC";
       d.supportEmail = settings.supportEmail || "";
       run(
         "INSERT INTO projects (id,workspace_id,public_id,name,client_name,draft,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
@@ -370,8 +377,14 @@ export function installRoutes(app: Express) {
         d.supportEmail = "";
         d.supportUrl = "";
         d.logoId = d.logoId ? assetMap.get(d.logoId) || null : null;
+        const guideIds = new Map(d.guides.map((g) => [g.id, id()]));
+        d.sectionOrder = sectionOrder(d).map((key) =>
+          key.startsWith("guide:")
+            ? `guide:${guideIds.get(key.slice(6))}`
+            : key,
+        );
         d.guides.forEach((g) => {
-          g.id = id();
+          g.id = guideIds.get(g.id)!;
           g.steps.forEach((s) => {
             s.id = id();
             s.assetId = s.assetId ? assetMap.get(s.assetId) || null : null;

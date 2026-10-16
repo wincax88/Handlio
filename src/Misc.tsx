@@ -764,6 +764,13 @@ export function Policy({ kind, session }: { kind: string; session: Session }) {
             preparation; only reviewed, flattened images are uploaded. No
             advertising pixels or session recording are enabled.
           </p>
+          <p>
+            A signed, HttpOnly browser cookie helps limit verification-code
+            requests and failed guesses across email addresses. The cookie
+            expires after 30 days. Risk counters store a keyed device digest,
+            without raw device tokens, emails or browser fingerprints; inactive
+            counters are cleaned after 24 hours when no block remains.
+          </p>
           <h2>Access and sharing</h2>
           <p>
             Projects are private. Invited clients must verify their email.

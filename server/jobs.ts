@@ -319,7 +319,7 @@ export function installJobs(app: Express) {
             release: r.id,
             hash: r.hash,
             ...b,
-            renderer: "handlio-v1",
+            renderer: "handlio-v2",
           }),
         );
         const cached = many(
@@ -869,6 +869,11 @@ export async function maintenance() {
     }
     run("DELETE FROM sessions WHERE expires_at<?", now());
     run("DELETE FROM challenges WHERE created_at<?", now() - DAY);
+    run(
+      "DELETE FROM auth_device_risk WHERE updated_at<? AND blocked_until<=?",
+      now() - DAY,
+      now(),
+    );
     run("DELETE FROM audit WHERE created_at<?", now() - 90 * DAY);
     run("DELETE FROM usage WHERE kind='upload' AND created_at<?", now() - DAY);
     await processNotifications();

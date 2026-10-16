@@ -16,7 +16,8 @@ import {
   History,
 } from "lucide-react";
 import { Logo } from "./Prototype";
-import type { Release } from "../shared/model";
+import type { Release, Guide } from "../shared/model";
+import { handbookSections, projectDate } from "../shared/handbook";
 import type { Session } from "./types";
 import { api, ApiError, assetUrl, formatDate, send } from "./api";
 import {
@@ -42,12 +43,111 @@ export function Manual({
   const matches = (text: string) =>
     !query || text.toLowerCase().includes(query.toLowerCase());
   const isDraft = release.id === "draft";
+  const renderGuide = (g: Guide, i: number) => {
+    const guideMatches = matches(
+      [g.title, g.goal, g.prerequisites, g.audience, g.completion, g.faq].join(
+        " ",
+      ),
+    );
+    const steps = g.steps.filter(
+      (s) =>
+        guideMatches ||
+        matches([s.title, s.body, s.expected, s.warning, s.alt].join(" ")),
+    );
+    if (query && !guideMatches && !steps.length) return null;
+    return (
+      <section className="manual-guide" key={g.id} id={`guide-${g.id}`}>
+        <div className="manual-guide-heading">
+          <span>{String(i + 1).padStart(2, "0")}</span>
+          <div>
+            <h2>{g.title}</h2>
+            <p>{g.goal}</p>
+          </div>
+        </div>
+        <div className="manual-prerequisites">
+          <p>
+            <strong>Before you begin</strong>
+            <br />
+            {g.prerequisites}
+          </p>
+          <p>
+            <strong>Who this is for</strong>
+            <br />
+            {g.audience}
+          </p>
+        </div>
+        {steps.map((s) => (
+          <article className="manual-step" key={s.id} id={`step-${s.id}`}>
+            <div className="manual-step-heading">
+              <span>{g.steps.indexOf(s) + 1}</span>
+              <h3>{s.title}</h3>
+            </div>
+            <p>{s.body}</p>
+            {s.assetId && (
+              <Screenshot
+                aid={s.assetId}
+                releaseId={isDraft ? undefined : release.id}
+                alt={s.alt}
+              />
+            )}{" "}
+            {s.expected && (
+              <p className="manual-result">
+                <CheckCircle2 size={17} />
+                <span>
+                  <strong>Expected result</strong>
+                  <br />
+                  {s.expected}
+                </span>
+              </p>
+            )}
+            {s.warning && (
+              <p className="manual-warning">
+                <strong>Please note</strong>
+                <br />
+                {s.warning}
+              </p>
+            )}
+            {onQuestion && (
+              <div className="manual-step-actions">
+                <button onClick={() => onQuestion(s.id)}>
+                  <MessageSquare size={15} />
+                  Ask about this step
+                </button>
+                <button
+                  onClick={() => {
+                    const url = new URL(location.href);
+                    url.hash = `step-${s.id}`;
+                    void navigator.clipboard.writeText(url.toString());
+                  }}
+                >
+                  <ArrowUpRight size={15} />
+                  Copy step link
+                </button>
+              </div>
+            )}
+          </article>
+        ))}
+        <p className="manual-completion">
+          <strong>You’re done when</strong>
+          <br />
+          {g.completion}
+        </p>
+        {g.faq && (
+          <details>
+            <summary>Common questions</summary>
+            <p>{g.faq}</p>
+          </details>
+        )}
+      </section>
+    );
+  };
   return (
     <div
       className="manual"
+      lang={d.language || "en"}
       style={{ "--brand": d.color } as React.CSSProperties}
     >
-      <header className="manual-cover" id="handbook-overview">
+      <header className="manual-cover" id="handbook-cover">
         {d.logoId ? (
           <img
             className="manual-logo"
@@ -59,13 +159,12 @@ export function Manual({
         )}
         <p className="eyebrow">PREPARED FOR {d.clientName.toUpperCase()}</p>
         <h1>{d.title}</h1>
-        <p className="manual-intro">{d.intro}</p>
         <div className="manual-meta">
           <Badge tone="green">
             {isDraft ? "Draft preview" : `Version ${release.version}`}
           </Badge>
           {release.publishedAt && (
-            <span>{formatDate(release.publishedAt)}</span>
+            <span>{projectDate(release.publishedAt, d)}</span>
           )}
         </div>
         {release.summary && (
@@ -75,105 +174,74 @@ export function Manual({
           </details>
         )}
       </header>
-      {d.guides.map((g, i) => {
-        const guideMatches = matches(
-          [
-            g.title,
-            g.goal,
-            g.prerequisites,
-            g.audience,
-            g.completion,
-            g.faq,
-          ].join(" "),
-        );
-        const steps = g.steps.filter(
-          (s) =>
-            guideMatches ||
-            matches([s.title, s.body, s.expected, s.warning, s.alt].join(" ")),
-        );
-        if (query && !guideMatches && !steps.length) return null;
-        return (
-          <section className="manual-guide" key={g.id} id={`guide-${g.id}`}>
-            <div className="manual-guide-heading">
-              <span>{String(i + 1).padStart(2, "0")}</span>
-              <div>
-                <h2>{g.title}</h2>
-                <p>{g.goal}</p>
-              </div>
-            </div>
-            <div className="manual-prerequisites">
+      {handbookSections(d).map((section) => {
+        if (section.kind === "guide")
+          return renderGuide(section.guide, section.number - 1);
+        if (query) return null;
+        if (section.id === "overview")
+          return (
+            <section
+              className="manual-guide"
+              key={section.id}
+              id="handbook-overview"
+            >
+              <h2>{section.title}</h2>
+              <p className="manual-intro">{d.intro}</p>
               <p>
-                <strong>Before you begin</strong>
-                <br />
-                {g.prerequisites}
+                {d.projectName} · {d.clientName}
               </p>
+            </section>
+          );
+        if (section.id === "checklist")
+          return (
+            <section
+              className="manual-guide"
+              key={section.id}
+              id="handoff-checklist"
+            >
+              <h2>{section.title}</h2>
               <p>
-                <strong>Who this is for</strong>
-                <br />
-                {g.audience}
+                The creator marks these when instructions are provided. Your
+                receipt confirmation is a separate action.
               </p>
-            </div>
-            {steps.map((s) => (
-              <article className="manual-step" key={s.id} id={`step-${s.id}`}>
-                <div className="manual-step-heading">
-                  <span>{g.steps.indexOf(s) + 1}</span>
-                  <h3>{s.title}</h3>
-                </div>
-                <p>{s.body}</p>
-                {s.assetId && (
-                  <Screenshot
-                    aid={s.assetId}
-                    releaseId={isDraft ? undefined : release.id}
-                    alt={s.alt}
-                  />
-                )}{" "}
-                {s.expected && (
-                  <p className="manual-result">
-                    <CheckCircle2 size={17} />
-                    <span>
-                      <strong>Expected result</strong>
-                      <br />
-                      {s.expected}
-                    </span>
-                  </p>
-                )}
-                {s.warning && (
-                  <p className="manual-warning">
-                    <strong>Please note</strong>
-                    <br />
-                    {s.warning}
-                  </p>
-                )}
-                {onQuestion && (
-                  <div className="manual-step-actions">
-                    <button onClick={() => onQuestion(s.id)}>
-                      <MessageSquare size={15} />
-                      Ask about this step
-                    </button>
-                    <button
-                      onClick={() => {
-                        const url = new URL(location.href);
-                        url.hash = `step-${s.id}`;
-                        void navigator.clipboard.writeText(url.toString());
-                      }}
-                    >
-                      <ArrowUpRight size={15} />
-                      Copy step link
-                    </button>
+              {d.checklist.map((c) => (
+                <div className="manual-checklist-item" key={c.id}>
+                  <span>
+                    {c.done ? (
+                      <CheckCircle2 size={19} />
+                    ) : (
+                      <span className="empty-circle" />
+                    )}
+                  </span>
+                  <div>
+                    <strong>{c.title}</strong>
+                    {c.required && <Badge>Required</Badge>}
+                    <p>{c.description}</p>
                   </div>
-                )}
-              </article>
-            ))}
-            <p className="manual-completion">
-              <strong>You’re done when</strong>
-              <br />
-              {g.completion}
-            </p>
-            {g.faq && (
-              <details>
-                <summary>Common questions</summary>
-                <p>{g.faq}</p>
-              </details>
+                </div>
+              ))}
+            </section>
+          );
+        return (
+          <section className="manual-guide" key={section.id} id="support">
+            <h2>{section.title}</h2>
+            <p>{d.maintenance}</p>
+            {d.supportEmail && (
+              <a href={`mailto:${d.supportEmail}`} className="support-link">
+                <Mail size={17} />
+                {d.supportEmail}
+              </a>
+            )}
+            {d.supportUrl && (
+              <a
+                href={d.supportUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="support-link"
+              >
+                Visit support website
+                <ArrowUpRight size={16} />
+              </a>
             )}
           </section>
         );
@@ -203,54 +271,6 @@ export function Manual({
             body="Try another word or clear the search to read the full handbook."
           />
         )}
-      {!query && (
-        <>
-          <section className="manual-guide" id="handoff-checklist">
-            <h2>Handoff checklist</h2>
-            <p>
-              The creator marks these when instructions are provided. Your
-              receipt confirmation is a separate action.
-            </p>
-            {d.checklist.map((c) => (
-              <div className="manual-checklist-item" key={c.id}>
-                <span>
-                  {c.done ? (
-                    <CheckCircle2 size={19} />
-                  ) : (
-                    <span className="empty-circle" />
-                  )}
-                </span>
-                <div>
-                  <strong>{c.title}</strong>
-                  {c.required && <Badge>Required</Badge>}
-                  <p>{c.description}</p>
-                </div>
-              </div>
-            ))}
-          </section>
-          <section className="manual-guide" id="support">
-            <h2>Support & maintenance</h2>
-            <p>{d.maintenance}</p>
-            {d.supportEmail && (
-              <a href={`mailto:${d.supportEmail}`} className="support-link">
-                <Mail size={17} />
-                {d.supportEmail}
-              </a>
-            )}
-            {d.supportUrl && (
-              <a
-                href={d.supportUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="support-link"
-              >
-                Visit support website
-                <ArrowUpRight size={16} />
-              </a>
-            )}
-          </section>
-        </>
-      )}
       <footer className="manual-footer">
         <span>
           Prepared with <strong>handlio.</strong>
@@ -552,53 +572,24 @@ export function Reader({
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
-            <nav>
-              <a
-                href="#handbook-overview"
-                className={activeAnchor === "handbook-overview" ? "active" : ""}
-                onClick={() => {
-                  setQuery("");
-                  setTocOpen(false);
-                  setActiveAnchor("handbook-overview");
-                }}
-              >
-                Overview
-              </a>
-              {r.snapshot.guides.map((g, i) => (
+            <nav lang={r.snapshot.language || "en"}>
+              {handbookSections(r.snapshot).map((section) => (
                 <a
-                  key={g.id}
-                  href={`#guide-${g.id}`}
-                  className={activeAnchor === `guide-${g.id}` ? "active" : ""}
+                  key={section.id}
+                  href={`#${section.anchor}`}
+                  className={activeAnchor === section.anchor ? "active" : ""}
                   onClick={() => {
                     setQuery("");
                     setTocOpen(false);
-                    setActiveAnchor(`guide-${g.id}`);
+                    setActiveAnchor(section.anchor);
                   }}
                 >
-                  <span>{String(i + 1).padStart(2, "0")}</span>
-                  {g.title}
+                  {section.kind === "guide" && (
+                    <span>{String(section.number).padStart(2, "0")}</span>
+                  )}
+                  {section.title}
                 </a>
               ))}
-              <a
-                href="#handoff-checklist"
-                onClick={() => {
-                  setQuery("");
-                  setTocOpen(false);
-                  setActiveAnchor("handoff-checklist");
-                }}
-              >
-                Handoff checklist
-              </a>
-              <a
-                href="#support"
-                onClick={() => {
-                  setQuery("");
-                  setTocOpen(false);
-                  setActiveAnchor("support");
-                }}
-              >
-                Support & maintenance
-              </a>
             </nav>
           </details>
           <Field label="Version">
@@ -622,7 +613,7 @@ export function Reader({
               ))}
             </select>
           </Field>
-          <small>Published {formatDate(r.publishedAt)}</small>
+          <small>Published {projectDate(r.publishedAt, r.snapshot)}</small>
           <Logo small />
           <p className="reader-signature">Clear guides. Smooth handoffs.</p>
           <small>
@@ -948,7 +939,7 @@ export function Reader({
                         v{r.version} · Published{" "}
                         {formatDate(
                           r.publishedAt,
-                          session.user!.settings.timezone,
+                          r.snapshot.timezone || "UTC",
                         )}
                       </dd>
                     </div>
@@ -968,7 +959,7 @@ export function Reader({
                       <dd>
                         {formatDate(
                           request.confirmations[0].created_at,
-                          session.user!.settings.timezone,
+                          r.snapshot.timezone || "UTC",
                         )}
                       </dd>
                     </div>

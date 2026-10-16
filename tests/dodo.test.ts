@@ -10,6 +10,8 @@ process.env.MAIL_PROVIDER = "local";
 const { createApp } = await import("../server/app");
 const { one, run, many, db } = await import("../server/db");
 const { processWebhooks } = await import("../server/billing");
+const { reconcilePendingOrders, WEBHOOK_RETRY_COOLDOWN } =
+  await import("../server/billing-recovery");
 const app = createApp();
 const secret = `whsec_${Buffer.from("test-only-dodo-signing-key-32-bytes").toString("base64")}`;
 let agent: ReturnType<typeof request.agent>, csrf: string, projectId: string;
@@ -52,6 +54,8 @@ beforeAll(async () => {
   projectId = p.body.id;
 });
 beforeEach(() => {
+  vi.stubEnv("OPS_EMAILS", "");
+  vi.stubEnv("BILLING_ADAPTER_URL", "");
   vi.stubEnv("NODE_ENV", "test");
   vi.stubEnv("PAYMENTS_SANDBOX_INSTANCE", "");
   run("DELETE FROM billing_instance");
@@ -143,6 +147,335 @@ afterAll(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   db.close();
+});
+
+test("daily reconciliation recovers a missed webhook once without creating another checkout", async () => {
+  const oid = await checkout();
+  const payment = paymentFor(oid);
+  run("UPDATE orders SET created_at=? WHERE id=?", Date.now() - 600000, oid);
+  const results = await Promise.all([
+    reconcilePendingOrders(),
+    reconcilePendingOrders(),
+  ]);
+  expect(results.reduce((n, r) => n + r.checked, 0)).toBe(1);
+  expect(one("SELECT status FROM orders WHERE id=?", oid)?.status).toBe("paid");
+  expect(one("SELECT COUNT(*) AS n FROM grants WHERE order_id=?", oid)?.n).toBe(
+    1,
+  );
+  expect(checkoutBodies).toHaveLength(1);
+  expect((await reconcilePendingOrders()).checked).toBe(0);
+  await event(payment);
+  await processWebhooks();
+  expect(one("SELECT COUNT(*) AS n FROM grants WHERE order_id=?", oid)?.n).toBe(
+    1,
+  );
+});
+
+test("pending lookups retain a durable daily schedule and respect manual verification cooldown", async () => {
+  const oid = await checkout();
+  run("UPDATE orders SET created_at=? WHERE id=?", Date.now() - 600000, oid);
+  run("INSERT INTO order_checks VALUES (?,?)", oid, Date.now());
+  expect((await reconcilePendingOrders()).checked).toBe(0);
+  run("UPDATE order_checks SET checked_at=0 WHERE order_id=?", oid);
+  expect((await reconcilePendingOrders()).checked).toBe(1);
+  const schedule = one(
+    "SELECT * FROM billing_reconciliations WHERE order_id=?",
+    oid,
+  )!;
+  expect(schedule.state).toBe("succeeded");
+  expect(schedule.next_at - schedule.checked_at).toBe(86400000);
+  expect(one("SELECT status FROM orders WHERE id=?", oid)?.status).toBe(
+    "pending",
+  );
+  const calls = vi.mocked(fetch).mock.calls.length;
+  expect((await reconcilePendingOrders()).checked).toBe(0);
+  expect(vi.mocked(fetch).mock.calls).toHaveLength(calls);
+  paymentFor(oid);
+  run("UPDATE billing_reconciliations SET next_at=0 WHERE order_id=?", oid);
+  run("UPDATE order_checks SET checked_at=0 WHERE order_id=?", oid);
+  expect((await reconcilePendingOrders()).checked).toBe(1);
+  expect(one("SELECT status FROM orders WHERE id=?", oid)?.status).toBe("paid");
+});
+
+test("a mismatched provider result cannot grant rights or starve another pending order", async () => {
+  const badId = await checkout();
+  const badPayment = paymentFor(badId, { total_amount: 1 });
+  run("UPDATE orders SET status='failed' WHERE id=?", badId);
+  const goodId = await checkout();
+  paymentFor(goodId);
+  run("UPDATE orders SET status='pending',created_at=?", Date.now() - 600000);
+  expect(await reconcilePendingOrders()).toEqual({
+    checked: 1,
+    failed: 1,
+    skipped: 0,
+  });
+  expect(one("SELECT status FROM orders WHERE id=?", badId)?.status).toBe(
+    "pending",
+  );
+  expect(one("SELECT status FROM orders WHERE id=?", goodId)?.status).toBe(
+    "paid",
+  );
+  const failed = one(
+    "SELECT * FROM billing_reconciliations WHERE order_id=?",
+    badId,
+  )!;
+  expect(failed.state).toBe("failed");
+  expect(failed.error_code).toBe("PAYMENT_MISMATCH");
+  expect(failed.next_at).toBeGreaterThan(Date.now());
+  expect(
+    one("SELECT COUNT(*) AS n FROM grants WHERE order_id=?", badId)?.n,
+  ).toBe(0);
+  vi.stubEnv("OPS_EMAILS", "dodo-owner@example.test");
+  const diagnostics = (await agent.get("/api/ops")).body;
+  expect(diagnostics.alerts).toContainEqual(
+    expect.objectContaining({ id: badId, error_code: "PAYMENT_MISMATCH" }),
+  );
+  badPayment.total_amount = 2090;
+  run("UPDATE billing_reconciliations SET next_at=0 WHERE order_id=?", badId);
+  run("UPDATE order_checks SET checked_at=0 WHERE order_id=?", badId);
+  expect((await reconcilePendingOrders()).checked).toBe(1);
+  expect(
+    one("SELECT COUNT(*) AS n FROM grants WHERE order_id=?", badId)?.n,
+  ).toBe(1);
+});
+
+test("reconciliation excludes unsubmitted and other-environment checkouts and bounds each batch", async () => {
+  const oid = await checkout();
+  run("UPDATE orders SET created_at=? WHERE id=?", Date.now() - 600000, oid);
+  run(
+    "UPDATE dodo_checkouts SET environment='live_mode' WHERE order_id=?",
+    oid,
+  );
+  expect((await reconcilePendingOrders()).checked).toBe(0);
+  vi.stubEnv("BILLING_PROVIDER", "");
+  expect((await reconcilePendingOrders()).checked).toBe(0);
+  vi.stubEnv("BILLING_ADAPTER_URL", "https://billing-adapter.example.test");
+  const pending = vi.fn(async (input: RequestInfo | URL) => {
+    const id = new URL(String(input)).pathname.split("/").pop();
+    return new Response(JSON.stringify({ orderId: id, status: "pending" }), {
+      status: 200,
+    });
+  });
+  vi.stubGlobal("fetch", pending);
+  // A generic adapter must never query an order belonging to Dodo.
+  expect((await reconcilePendingOrders()).checked).toBe(0);
+  for (let i = 0; i < 12; i++)
+    run(
+      "INSERT INTO orders (id,project_id,workspace_id,product,amount,currency,status,checkout_url,created_at) SELECT ?,id,workspace_id,'project',1900,'USD','pending',?,? FROM projects WHERE id=?",
+      `generic-${i}`,
+      i === 11 ? null : "https://checkout.example.test/session",
+      Date.now() - 600000,
+      projectId,
+    );
+  expect((await reconcilePendingOrders()).checked).toBe(10);
+  expect((await reconcilePendingOrders()).checked).toBe(1);
+  expect(pending).toHaveBeenCalledTimes(11);
+  expect(
+    one("SELECT * FROM billing_reconciliations WHERE order_id='generic-11'"),
+  ).toBeUndefined();
+  vi.stubEnv("BILLING_ADAPTER_URL", "");
+});
+
+test("generic reconciliation verifies the original transaction and resumes an expired worker lease", async () => {
+  vi.stubEnv("BILLING_PROVIDER", "");
+  vi.stubEnv("BILLING_ADAPTER_URL", "https://billing-adapter.example.test");
+  const oid = randomUUID();
+  run(
+    "INSERT INTO orders (id,project_id,workspace_id,product,amount,currency,status,checkout_url,created_at) SELECT ?,id,workspace_id,'project',1900,'USD','pending',?,? FROM projects WHERE id=?",
+    oid,
+    "https://checkout.example.test/session",
+    Date.now() - 600000,
+    projectId,
+  );
+  run(
+    "INSERT INTO billing_reconciliations VALUES (?,?,?,'running',NULL)",
+    oid,
+    Date.now() - 1000000,
+    Date.now() - 1,
+  );
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "generic-transaction",
+            orderId: oid,
+            status: "paid",
+            amount: 1900,
+            currency: "USD",
+            environment: "sandbox",
+            paidAt: new Date().toISOString(),
+          }),
+          { status: 200 },
+        ),
+    ),
+  );
+  expect((await reconcilePendingOrders()).checked).toBe(1);
+  expect(one("SELECT status FROM orders WHERE id=?", oid)?.status).toBe("paid");
+  expect(one("SELECT COUNT(*) AS n FROM grants WHERE order_id=?", oid)?.n).toBe(
+    1,
+  );
+  vi.stubEnv("BILLING_ADAPTER_URL", "");
+});
+
+test("dead webhook repair requires operations access, recent verification, CSRF and a reason", async () => {
+  const oid = await checkout();
+  const payment = paymentFor(oid);
+  const deliveryId = randomUUID();
+  const eid = `dodo:test_mode:${deliveryId}`;
+  expect((await event(payment, "payment.succeeded", deliveryId)).status).toBe(
+    200,
+  );
+  failure = true;
+  for (let i = 0; i < 5; i++) await processWebhooks();
+  expect(one("SELECT status FROM webhooks WHERE id=?", eid)?.status).toBe(
+    "dead",
+  );
+  expect(
+    (
+      await call(`/api/ops/webhooks/${eid}/retry`, {
+        reason: "Provider recovered",
+      })
+    ).status,
+  ).toBe(404);
+  vi.stubEnv("OPS_EMAILS", "dodo-owner@example.test");
+  expect(
+    (
+      await agent
+        .post(`/api/ops/webhooks/${eid}/retry`)
+        .send({ reason: "Provider recovered" })
+    ).status,
+  ).toBe(403);
+  expect(
+    (await call(`/api/ops/webhooks/${eid}/retry`, { reason: "no" })).status,
+  ).toBe(400);
+  run(
+    "UPDATE sessions SET verified_at=0 WHERE user_id=(SELECT id FROM users WHERE email='dodo-owner@example.test')",
+  );
+  expect(
+    (
+      await call(`/api/ops/webhooks/${eid}/retry`, {
+        reason: "Provider recovered",
+      })
+    ).status,
+  ).toBe(401);
+  run(
+    "UPDATE sessions SET verified_at=? WHERE user_id=(SELECT id FROM users WHERE email='dodo-owner@example.test')",
+    Date.now(),
+  );
+  const metadata = (await agent.get(`/api/ops/webhooks/${eid}`)).body;
+  expect(metadata.status).toBe("dead");
+  expect(metadata.total_attempts).toBe(5);
+  expect(metadata).not.toHaveProperty("body");
+  expect((await agent.get("/api/ops")).body.alerts).toContainEqual(
+    expect.objectContaining({ id: eid, error_code: "PAYMENT_WEBHOOK_DEAD" }),
+  );
+  const retried = await call(`/api/ops/webhooks/${eid}/retry`, {
+    reason: "Provider recovered after outage",
+  });
+  expect(retried.status).toBe(202);
+  expect(retried.body.status).toBe("queued");
+  expect(retried.body.total_attempts).toBe(5);
+  expect(retried.body).not.toHaveProperty("body");
+  const audit = JSON.parse(
+    one(
+      "SELECT metadata FROM audit WHERE action='ops_webhook_retry' ORDER BY created_at DESC LIMIT 1",
+    )!.metadata,
+  );
+  expect(audit).toMatchObject({
+    webhookId: eid,
+    reason: "Provider recovered after outage",
+    before: { status: "dead", attempts: 5 },
+    after: { status: "queued", attempts: 0 },
+  });
+  expect(one("SELECT status FROM orders WHERE id=?", oid)?.status).toBe(
+    "pending",
+  );
+  const concurrent = await Promise.all([
+    call(`/api/ops/webhooks/${eid}/retry`, { reason: "Another retry" }),
+    call(`/api/ops/webhooks/${eid}/retry`, { reason: "Another retry" }),
+  ]);
+  expect(concurrent.map((r) => r.status)).toEqual([429, 429]);
+  failure = false;
+  await processWebhooks();
+  expect(one("SELECT status FROM webhooks WHERE id=?", eid)?.status).toBe(
+    "processed",
+  );
+  expect(one("SELECT COUNT(*) AS n FROM grants WHERE order_id=?", oid)?.n).toBe(
+    1,
+  );
+});
+
+test("repair preserves lifetime attempts and rejects wrong environments and completed events", async () => {
+  const oid = await checkout();
+  const payment = paymentFor(oid);
+  const deliveryId = randomUUID();
+  const eid = `dodo:test_mode:${deliveryId}`;
+  expect((await event(payment, "payment.succeeded", deliveryId)).status).toBe(
+    200,
+  );
+  vi.stubEnv("OPS_EMAILS", "dodo-owner@example.test");
+  expect(
+    (
+      await call(`/api/ops/webhooks/${eid}/retry`, {
+        reason: "Inspect queued event",
+      })
+    ).status,
+  ).toBe(409);
+  run("UPDATE webhooks SET status='dead',attempts=5 WHERE id=?", eid);
+  vi.stubEnv("DODO_PAYMENTS_ENVIRONMENT", "live_mode");
+  expect(
+    (
+      await call(`/api/ops/webhooks/${eid}/retry`, {
+        reason: "Wrong environment",
+      })
+    ).status,
+  ).toBe(409);
+  expect(one("SELECT attempts FROM webhooks WHERE id=?", eid)?.attempts).toBe(
+    5,
+  );
+  vi.stubEnv("DODO_PAYMENTS_ENVIRONMENT", "test_mode");
+  expect(
+    (
+      await call(`/api/ops/webhooks/${eid}/retry`, {
+        reason: "Retry after provider recovery",
+      })
+    ).status,
+  ).toBe(202);
+  run("UPDATE webhooks SET status='dead',attempts=5 WHERE id=?", eid);
+  expect(
+    (
+      await call(`/api/ops/webhooks/${eid}/retry`, {
+        reason: "Still cooling down",
+      })
+    ).status,
+  ).toBe(429);
+  run(
+    "UPDATE webhook_retries SET retried_at=? WHERE webhook_id=?",
+    Date.now() - WEBHOOK_RETRY_COOLDOWN - 1,
+    eid,
+  );
+  const again = await call(`/api/ops/webhooks/${eid}/retry`, {
+    reason: "Recovered after second outage",
+  });
+  expect(again.status).toBe(202);
+  expect(again.body.total_attempts).toBe(10);
+  await processWebhooks();
+  expect(
+    (await agent.get(`/api/ops/webhooks/${eid}`)).body.total_attempts,
+  ).toBe(11);
+  run("UPDATE webhook_retries SET retried_at=0 WHERE webhook_id=?", eid);
+  expect(
+    (
+      await call(`/api/ops/webhooks/${eid}/retry`, {
+        reason: "Already processed event",
+      })
+    ).status,
+  ).toBe(409);
+  expect(one("SELECT COUNT(*) AS n FROM grants WHERE order_id=?", oid)?.n).toBe(
+    1,
+  );
 });
 async function checkout(product = "project") {
   const c = await call("/api/billing/checkouts", { projectId, product });

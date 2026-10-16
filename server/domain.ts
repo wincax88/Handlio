@@ -18,6 +18,7 @@ import {
   type Draft,
   type Issue,
 } from "../shared/model.js";
+import { presentationDefaults, sectionOrder } from "../shared/handbook.js";
 export const DAY = 86400000;
 export function owner(user: Row, projectId: string) {
   const p = requireValue(
@@ -203,7 +204,7 @@ export function releaseDto(r: Row) {
   };
 }
 export function projectDto(p: Row) {
-  const d = JSON.parse(p.draft) as Draft;
+  const d = presentationDefaults(JSON.parse(p.draft));
   const r = p.current_release_id
     ? one("SELECT * FROM releases WHERE id=?", p.current_release_id)
     : undefined;
@@ -466,7 +467,7 @@ export function publish(p: Row, revision: number, summary: string) {
       "Resolve the publishing checks.",
       check,
     );
-  const d = JSON.parse(p.draft) as Draft;
+  const d = draftSchema.parse(JSON.parse(p.draft));
   const snapshot = {
     ...d,
     guides: d.guides
@@ -478,6 +479,7 @@ export function publish(p: Row, revision: number, summary: string) {
     projectName: p.name,
     clientName: p.client_name,
   };
+  snapshot.sectionOrder = sectionOrder(snapshot);
   const assets = [
     snapshot.logoId,
     ...snapshot.guides.flatMap((g) => g.steps.map((s) => s.assetId)),

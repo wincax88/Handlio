@@ -22,6 +22,8 @@ import {
   Eye,
 } from "lucide-react";
 import type { Draft } from "../shared/model";
+import { sectionOrder } from "../shared/handbook";
+import { ProjectLocaleSettings } from "./ProjectLocale";
 import type { Project, Session } from "./types";
 import { api, ApiError, formatDate, navigate, send } from "./api";
 import {
@@ -101,6 +103,16 @@ export function ProjectPage({
   function update(fn: (d: Draft) => void) {
     const next = structuredClone(latest.current!);
     fn(next);
+    next.sectionOrder = sectionOrder(next);
+    if (
+      JSON.stringify(next.guides.map((g) => g.id)) !==
+      JSON.stringify(latest.current!.guides.map((g) => g.id))
+    ) {
+      let index = 0;
+      next.sectionOrder = next.sectionOrder.map((key) =>
+        key.startsWith("guide:") ? `guide:${next.guides[index++].id}` : key,
+      );
+    }
     latest.current = next;
     setDraft(next);
     dirty.current = JSON.stringify(next) !== persisted.current;
@@ -419,7 +431,7 @@ export function ProjectPage({
         <div className="notice">
           {p.lifecycle === "archived"
             ? "This project is archived. Restore it to edit; sharing will stay paused."
-            : `Editing has ended. Owner export access ends ${formatDate(p.entitlement.graceUntil, session.user!.settings.timezone)}.`}
+            : `Editing has ended. Owner export access ends ${formatDate(p.entitlement.graceUntil, p.draft.timezone || "UTC")}.`}
         </div>
       )}
       <div
@@ -470,7 +482,7 @@ function Overview(props: ProjectEditorProps) {
   }, [p.id, p.updatedAt]);
   const steps = d.guides.reduce((n, g) => n + g.steps.length, 0);
   const e = p.entitlement;
-  const tz = session.user!.settings.timezone;
+  const tz = d.timezone || "UTC";
   const receipt = p.confirmation;
   const events = [
     ...(p.currentRelease
@@ -834,6 +846,7 @@ function Overview(props: ProjectEditorProps) {
           </Button>
         </Panel>
       </details>
+      <ProjectLocaleSettings draft={d} update={props.update} />
       <section className="project-management">
         <Resources projectId={p.id} />
         <h2>Project management</h2>

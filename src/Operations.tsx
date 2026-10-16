@@ -79,17 +79,25 @@ export function Operations() {
                       · {formatDate(row.created_at)}
                     </small>
                     {row.error && <small>{row.error}</small>}
+                    {row.error_code && <small>{row.error_code}</small>}
                   </div>
                   <Badge>
                     {row.state ||
                       row.status ||
+                      row.error_code ||
                       (row.revoked_at
                         ? "revoked"
                         : row.expires_at <= Date.now()
                           ? "expired"
                           : "active")}
                   </Badge>
-                  {["jobs", "orders", "requests", "grants"].includes(kind) && (
+                  {[
+                    "jobs",
+                    "orders",
+                    "requests",
+                    "grants",
+                    "webhooks",
+                  ].includes(kind) && (
                     <Button
                       kind="secondary"
                       disabled={
@@ -101,12 +109,15 @@ export function Operations() {
                         void action(async () => {
                           setSelected({ kind, row });
                           setReason("");
+                          setDetail(null);
                           setDetail(
                             kind === "jobs"
                               ? await api(`/ops/jobs/${row.id}`)
-                              : kind === "grants"
-                                ? await api(`/ops/grants/${row.id}`)
-                                : row,
+                              : kind === "webhooks"
+                                ? await api(`/ops/webhooks/${row.id}`)
+                                : kind === "grants"
+                                  ? await api(`/ops/grants/${row.id}`)
+                                  : row,
                           );
                         })
                       }
@@ -142,7 +153,11 @@ export function Operations() {
                 {Object.entries(detail).map(([key, value]) => (
                   <div key={key}>
                     <dt>{key.replaceAll("_", " ")}</dt>
-                    <dd>{String(value ?? "Unavailable")}</dd>
+                    <dd>
+                      {key.endsWith("_at") && typeof value === "number"
+                        ? formatDate(value)
+                        : String(value ?? "Unavailable")}
+                    </dd>
                   </div>
                 ))}
               </dl>
@@ -195,6 +210,38 @@ export function Operations() {
                 >
                   Verify provider status
                 </Button>
+              )}
+              {selected.kind === "webhooks" && (
+                <>
+                  <p>
+                    Retry queries the current provider transaction. It does not
+                    trust or edit the stored event. Controlled retries have a
+                    15-minute cooldown.
+                  </p>
+                  <Button
+                    disabled={
+                      busy ||
+                      reason.trim().length < 5 ||
+                      detail.status !== "dead" ||
+                      (detail.retry_available_at != null &&
+                        detail.retry_available_at > Date.now())
+                    }
+                    onClick={() =>
+                      void action(async () => {
+                        await send(`/ops/webhooks/${detail.id}/retry`, {
+                          reason,
+                        });
+                        setDetail(null);
+                        setSelected(null);
+                        setMessage(
+                          "Payment event queued for provider verification. Entitlements change only after verification succeeds.",
+                        );
+                      })
+                    }
+                  >
+                    Retry payment event
+                  </Button>
+                </>
               )}
               {selected.kind === "requests" && (
                 <>

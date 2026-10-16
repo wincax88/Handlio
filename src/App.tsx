@@ -51,6 +51,7 @@ import { Onboarding } from "./Workspace";
 import { PaymentPage } from "./Payment";
 import { isPrivatePath, isPublicPath } from "../shared/seo";
 import { updatePageMetadata } from "./seo";
+import { ProjectLocaleFields } from "./ProjectLocale";
 const defaultSession: Session = {
   user: null,
   localMode: false,
@@ -151,7 +152,7 @@ export function App({ initialRoute }: { initialRoute?: string } = {}) {
       ) : route === "/app/help" ? (
         <Help session={session} embedded />
       ) : route === "/app/projects/new" ? (
-        <NewProject />
+        <NewProject session={session} />
       ) : match ? (
         <ProjectPage
           key={match[1]}
@@ -1473,7 +1474,11 @@ function Projects({ session }: { session: Session }) {
     </>
   );
 }
-function NewProject() {
+function NewProject({ session }: { session: Session }) {
+  const [language, setLanguage] = useState("en");
+  const [timezone, setTimezone] = useState(
+    session.user?.settings.timezone || "UTC",
+  );
   const [name, setName] = useState("");
   const [clientName, setClientName] = useState("");
   const [title, setTitle] = useState("");
@@ -1494,6 +1499,8 @@ function NewProject() {
         clientName,
         title: title || `${name} handbook`,
         template,
+        language,
+        timezone,
       });
       navigate(`/app/projects/${p.id}`);
     } catch (e) {
@@ -1550,6 +1557,14 @@ function NewProject() {
               }
             />
           </Field>
+        </Panel>
+        <Panel title="Language & time zone">
+          <ProjectLocaleFields
+            language={language}
+            timezone={timezone}
+            onLanguage={setLanguage}
+            onTimezone={setTimezone}
+          />
         </Panel>
         <section className="template-section">
           <h2>Choose a starting point</h2>

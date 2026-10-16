@@ -20,9 +20,6 @@ import {
   Users,
   X,
   BookOpen,
-  ArrowUp,
-  ArrowDown,
-  CircleHelp,
 } from "lucide-react";
 import type { Issue, Release } from "../shared/model";
 import type { ProjectEditorProps } from "./ProjectPage";
@@ -43,6 +40,8 @@ import { Metric } from "./Prototype";
 import { VersionComparison } from "./Comparison";
 import { Terminology } from "./Terminology";
 import { Incidents } from "./Incidents";
+import { HandbookStructure } from "./HandbookStructure";
+import { ProjectLocaleSettings } from "./ProjectLocale";
 export async function waitJob(jid: string) {
   for (let i = 0; i < 185; i++) {
     await new Promise((r) => setTimeout(r, 1000));
@@ -187,123 +186,13 @@ export function Handbook({
               title="Handbook structure"
               actions={<small>Included in this draft</small>}
             >
-              <div className="structure-fixed-row">
-                <FileText size={19} />
-                <div>
-                  <strong>Project overview</strong>
-                  <small>Cover, introduction and scope</small>
-                </div>
-              </div>
-              {d.guides.map((g, i) => (
-                <div
-                  className="structure-guide-row"
-                  key={g.id}
-                  draggable
-                  onDragStart={(e) =>
-                    e.dataTransfer.setData("text/plain", g.id)
-                  }
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const gid = e.dataTransfer.getData("text/plain");
-                    update((v) => {
-                      const index = v.guides.findIndex((x) => x.id === gid);
-                      if (index < 0) return;
-                      const [moved] = v.guides.splice(index, 1);
-                      v.guides.splice(i, 0, moved);
-                    });
-                  }}
-                >
-                  <span className="drag-handle" aria-hidden="true">
-                    ⋮⋮
-                  </span>
-                  <span className="project-monogram">
-                    <BookOpen size={18} />
-                  </span>
-                  <div>
-                    <strong>{g.title}</strong>
-                    <small>
-                      {g.steps.length} steps ·{" "}
-                      {g.goal || "Add the goal in your guide"}
-                    </small>
-                  </div>
-                  <button
-                    className="icon-button"
-                    aria-label={`Move ${g.title} up`}
-                    disabled={i === 0}
-                    onClick={() =>
-                      update((v) => {
-                        [v.guides[i - 1], v.guides[i]] = [
-                          v.guides[i],
-                          v.guides[i - 1],
-                        ];
-                      })
-                    }
-                  >
-                    <ArrowUp size={15} />
-                  </button>
-                  <button
-                    className="icon-button"
-                    aria-label={`Move ${g.title} down`}
-                    disabled={i === d.guides.length - 1}
-                    onClick={() =>
-                      update((v) => {
-                        [v.guides[i + 1], v.guides[i]] = [
-                          v.guides[i],
-                          v.guides[i + 1],
-                        ];
-                      })
-                    }
-                  >
-                    <ArrowDown size={15} />
-                  </button>
-                  <Link
-                    to={`/app/projects/${p.id}/guides/${g.id}`}
-                    className="button secondary"
-                  >
-                    Edit
-                  </Link>
-                  <input
-                    type="checkbox"
-                    aria-label={`Include ${g.title} in release`}
-                    checked={g.included}
-                    onChange={(e) =>
-                      update((v) => {
-                        v.guides.find((x) => x.id === g.id)!.included =
-                          e.target.checked;
-                      })
-                    }
-                  />
-                </div>
-              ))}
-              <div className="structure-fixed-row">
-                <CheckCircle2 size={19} />
-                <div>
-                  <strong>Handoff checklist</strong>
-                  <small>
-                    {d.checklist.filter((c) => c.required).length} required
-                    items
-                  </small>
-                </div>
-                <a href="#handbook-checklist" className="button secondary">
-                  Edit
-                </a>
-              </div>
-              <div className="structure-fixed-row">
-                <CircleHelp size={19} />
-                <div>
-                  <strong>Support & maintenance</strong>
-                  <small>Contact details and clear boundaries</small>
-                </div>
-                <a href="#handbook-support" className="button secondary">
-                  Edit
-                </a>
-              </div>
+              <HandbookStructure draft={d} update={update} projectId={p.id} />
               <p className="muted structure-note">
                 Only included guides are published. Internal notes and client
                 comments are excluded from the handbook and exports.
               </p>
             </Panel>
+            <ProjectLocaleSettings draft={d} update={update} />
             <Terminology draft={d} update={update} />
             <div id="handbook-checklist">
               <Panel
@@ -487,7 +376,7 @@ export function Handbook({
               </Panel>
             </div>
           </div>
-          <aside>
+          <aside id="handbook-cover">
             <Panel
               title="Brand & cover"
               actions={<Badge>One reliable layout</Badge>}
@@ -817,7 +706,7 @@ export function Releases({
                 <div>
                   <strong>{r.summary}</strong>
                   <small>
-                    {formatDate(r.publishedAt, session.user!.settings.timezone)}
+                    {formatDate(r.publishedAt, r.snapshot.timezone || "UTC")}
                   </small>
                 </div>
                 <Badge tone={r.status === "published" ? "green" : "red"}>
@@ -1050,7 +939,7 @@ export function Handoff({
               }
               note={
                 p.currentRelease
-                  ? `Published ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: session.user!.settings.timezone }).format(new Date(p.currentRelease.publishedAt))}`
+                  ? `Published ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: p.draft.timezone || "UTC" }).format(new Date(p.currentRelease.publishedAt))}`
                   : "No published version yet"
               }
               icon={BookOpen}
@@ -1360,11 +1249,8 @@ export function Handoff({
                     {r.confirmations.map((c: any) => (
                       <small key={c.member_id}>
                         Confirmed{" "}
-                        {formatDate(
-                          c.created_at,
-                          session.user!.settings.timezone,
-                        )}{" "}
-                        · receipt-v1
+                        {formatDate(c.created_at, p.draft.timezone || "UTC")} ·
+                        receipt-v1
                       </small>
                     ))}
                   </div>
@@ -1432,10 +1318,7 @@ export function Handoff({
                         <Badge tone="red">Blocks confirmation</Badge>
                       )}
                       <small>
-                        {formatDate(
-                          q.created_at,
-                          session.user!.settings.timezone,
-                        )}
+                        {formatDate(q.created_at, p.draft.timezone || "UTC")}
                       </small>
                     </div>
                     <p>{q.body}</p>
@@ -1715,7 +1598,7 @@ export function Exports({ project: p, session }: ProjectEditorProps) {
                     {j.format === "pdf" ? ` · ${j.paper}` : " · HTML ZIP"}
                   </small>
                   <small>
-                    {formatDate(j.created_at, session.user!.settings.timezone)}
+                    {formatDate(j.created_at, p.draft.timezone || "UTC")}
                     {j.output?.bytes
                       ? ` · ${(j.output.bytes / 1024).toFixed(0)} KiB`
                       : ""}
@@ -1724,10 +1607,7 @@ export function Exports({ project: p, session }: ProjectEditorProps) {
                   {j.availableUntil && (
                     <small>
                       Available until{" "}
-                      {formatDate(
-                        j.availableUntil,
-                        session.user!.settings.timezone,
-                      )}
+                      {formatDate(j.availableUntil, p.draft.timezone || "UTC")}
                     </small>
                   )}
                 </div>
