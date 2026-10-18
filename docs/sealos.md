@@ -57,7 +57,7 @@ Dodo 正式收款使用独立 Secrets：`DODO_LIVE_API_KEY`、`DODO_LIVE_WEBHOOK
 
 Pod 模板的发布标记包含 GitHub Run ID 和 Run Attempt。更新 Secrets 后，即使只重跑同一次发布的部署任务、镜像保持不变，也会重启 Pod 加载新配置；以部署后的支付能力与签名回调验收结果确认配置生效。
 
-容器非 root 运行，不挂载 Kubernetes ServiceAccount Token，移除 Linux capabilities。资源请求为 100m CPU / 256Mi 内存，限制为 1 CPU / 1Gi；PDF 和图片处理共享此限制。需要提高并发时先调整资源和架构，不要直接增加副本。
+容器非 root 运行，不挂载 Kubernetes ServiceAccount Token，移除 Linux capabilities。资源请求为 100m CPU / 256Mi 内存，限制为 500m CPU（0.5 核）/ 1Gi；PDF 和图片处理共享此限制。持久卷保持 5Gi。降配后应验证长手册 PDF 导出、图片上传及导出期间的网页访问，并观察任务超时、CPU 限流与容器重启情况；需要提高并发时先调整资源和架构，不要直接增加副本。
 
 应用只信任显式设置的私网代理地址（`TRUST_PROXY=uniquelocal`）。外部入口只有 Nginx Ingress，Service 保持 ClusterIP。Ingress Controller 必须正确重写来自公网的 X-Forwarded-For；不要改为信任所有代理。`/api/health` 不消耗业务 API 限流额度。
 
