@@ -1,11 +1,12 @@
 import { chromium } from "playwright";
 import { ZipArchive } from "archiver";
 import { createWriteStream, existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { dataDir, requireValue, one, AppError, type Row } from "./db.js";
 import type { Draft, Guide } from "../shared/model.js";
 import { handbookSections, projectDate } from "../shared/handbook.js";
+import { closePdfBrowser } from "./pdf-browser.js";
 import {
   PDFDocument,
   PDFArray,
@@ -34,10 +35,11 @@ export async function renderHtml(r: Row, inline = false, paper = "A4") {
     clientName: string;
   };
   const images = new Map<string, string>();
-  for (const aid of [
-    d.logoId,
-    ...d.guides.flatMap((g) => g.steps.map((s) => s.assetId)),
-  ].filter(Boolean) as string[]) {
+  for (const aid of new Set(
+    [d.logoId, ...d.guides.flatMap((g) => g.steps.map((s) => s.assetId))].filter(
+      Boolean,
+    ) as string[],
+  )) {
     requireValue(
       one(
         "SELECT id FROM assets WHERE id=? AND project_id=? AND status='ready'",
@@ -128,12 +130,17 @@ export async function generateExport(
         "C:/Program Files/Google/Chrome/Application/chrome.exe",
         "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
       ].find(existsSync);
-    const browser = await chromium.launch({
+    // Own the renderer process so a stalled graceful close can be forced.
+    const browserServer = await chromium.launchServer({
+      host: "127.0.0.1",
       headless: true,
       timeout: 15000,
       ...(browserPath ? { executablePath: browserPath } : {}),
     });
     try {
+      const browser = await chromium.connect(browserServer.wsEndpoint(), {
+        timeout: 15000,
+      });
       const page = await browser.newPage();
       await page.route("**/*", (route) => route.abort());
       await page.setContent(
@@ -161,12 +168,12 @@ export async function generateExport(
       pages = numbered.pages;
       tocEntries = numbered.tocEntries;
     } finally {
-      await browser.close();
+      await closePdfBrowser(browserServer);
     }
   }
   return {
     file: path.basename(output),
-    bytes: (await readFile(output)).length,
+    bytes: (await stat(output)).size,
     format,
     paper,
     releaseId: r.id,

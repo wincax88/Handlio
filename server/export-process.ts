@@ -39,6 +39,21 @@ export async function isolatedExport(
         },
       );
       let done = false;
+      function waitForExit(ms: number) {
+        if (child.exitCode !== null || child.signalCode !== null)
+          return Promise.resolve(true);
+        return new Promise<boolean>((resolve) => {
+          const onExit = () => {
+            clearTimeout(timer);
+            resolve(true);
+          };
+          const timer = setTimeout(() => {
+            child.off("exit", onExit);
+            resolve(false);
+          }, ms);
+          child.once("exit", onExit);
+        });
+      }
       async function kill() {
         if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
         const stopped = new Promise<void>((resolve) => { child.once("exit", () => resolve()); setTimeout(resolve, 5000).unref(); });
@@ -77,7 +92,9 @@ export async function isolatedExport(
         done = true;
         clearTimeout(timer);
         clearInterval(cancellation);
-        await kill();
+        // The worker exits after sending its result. Avoid an expensive process
+        // tree scan on every successful export; force cleanup if it gets stuck.
+        if (error || !(await waitForExit(1000))) await kill();
         error ? reject(error) : resolve(result);
       }
       child.once("message", (message: any) =>
