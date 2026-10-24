@@ -1553,16 +1553,25 @@ export function installRoutes(app: Express) {
       })
       .parse(req.body);
     const sid = id();
-    run(
-      "INSERT INTO support_requests VALUES (?,?,?,?,?,?,?)",
-      sid,
-      me(res)?.id || null,
-      b.kind,
-      b.email,
-      b.body,
-      "open",
-      now(),
-    );
+    tx(() => {
+      run(
+        "INSERT INTO support_requests VALUES (?,?,?,?,?,?,?)",
+        sid,
+        me(res)?.id || null,
+        b.kind,
+        b.email,
+        b.body,
+        "open",
+        now(),
+      );
+      notify(
+        null,
+        `support:${sid}`,
+        "support@handlio.cloud",
+        `[Handlio support] ${b.kind} request — ${sid}`,
+        `Reference: ${sid}\nRequest type: ${b.kind}\nUser email: ${b.email}\n\n${b.body}`,
+      );
+    });
     res.json({ id: sid, status: "open" });
   });
   app.get("/api/support", authenticated, (req, res) =>
