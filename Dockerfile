@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends fontconfig font
     && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
-ARG SOURCE_REPOSITORY=https://github.com/wincax88/Handlio
+ARG SOURCE_REPOSITORY=https://github.com/handlio-lab/Handlio
 ARG SOURCE_REVISION=main
 ENV VITE_SOURCE_REPOSITORY=$SOURCE_REPOSITORY VITE_SOURCE_REVISION=$SOURCE_REVISION
 COPY index.html tsconfig.json vite.config.ts vitest.config.ts playwright.config.ts ./

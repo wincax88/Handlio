@@ -69,7 +69,7 @@ jobs:
           push: true
           platforms: linux/amd64
           build-args: |
-            SOURCE_REPOSITORY=https://github.com/${{ github.repository }}
+            SOURCE_REPOSITORY=https://github.com/handlio-lab/Handlio
             SOURCE_REVISION=${{ github.sha }}
           tags: ${{ steps.name.outputs.image }}:sha-${{ github.sha }}
           labels: |
@@ -98,7 +98,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:3001/api/health
           curl --fail --silent http://127.0.0.1:3001/ | grep -q '<div id="root"'
-          docker exec -e EXPECTED_SOURCE_URL="https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA" handlio-smoke node --input-type=module -e '
+          docker exec -e EXPECTED_SOURCE_URL="https://github.com/handlio-lab/Handlio/tree/$GITHUB_SHA" handlio-smoke node --input-type=module -e '
             import { chromium } from "playwright";
             import { readFile } from "node:fs/promises";
             const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXECUTABLE_PATH });

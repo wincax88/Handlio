@@ -142,7 +142,7 @@ Copyright (C) 2026 Handlio contributors.
 
 Handlio is free software licensed under the **GNU Affero General Public License, version 3 only** (`AGPL-3.0-only`). You may use, modify, and redistribute it under the terms in [LICENSE](LICENSE). This grant does not include later versions of the license. Third-party dependencies and materials retain their respective licenses.
 
-If you modify Handlio and make it available over a network, AGPL section 13 requires you to prominently offer the corresponding source of your version to users interacting with it. The hosted app provides source and license links in its footer. Container builds use `SOURCE_REPOSITORY` and `SOURCE_REVISION` to identify the source of the deployed version; modified deployments must point these at their own corresponding source. The GitHub Actions build sets them automatically from the repository and commit.
+If you modify Handlio and make it available over a network, AGPL section 13 requires you to prominently offer the corresponding source of your version to users interacting with it. The hosted app provides source and license links in its footer. Container builds use `SOURCE_REPOSITORY` and `SOURCE_REVISION` to identify the source of the deployed version; modified deployments must point these at their own corresponding source. The GitHub Actions build uses `https://github.com/handlio-lab/Handlio` as the source repository and sets the revision automatically from the commit.
 
 The software is provided without warranty, to the extent permitted by law. See [LICENSE](LICENSE) for the complete terms.
 

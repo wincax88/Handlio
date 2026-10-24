@@ -1,6 +1,6 @@
 const sourceRepository = (
   import.meta.env.VITE_SOURCE_REPOSITORY ||
-  "https://github.com/wincax88/Handlio"
+  "https://github.com/handlio-lab/Handlio"
 ).replace(/\/+$/, "");
 const sourceRevision = import.meta.env.VITE_SOURCE_REVISION || "main";
 
